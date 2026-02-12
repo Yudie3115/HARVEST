@@ -1,0 +1,136 @@
+services:
+  # PostgreSQL - Metadata & crawl state
+  postgres:
+    image: postgres:15-alpine
+    container_name: postharvest-postgres
+    environment:
+      POSTGRES_DB: postharvest_scraper
+      POSTGRES_USER: scraper
+      POSTGRES_PASSWORD: ph_scraper_pass
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postharvest_scraper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraper-network
+
+  # MinIO - Object storage for documents
+  minio:
+    image: minio/minio:latest
+    container_name: postharvest-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - scraper-network
+
+  # Qdrant - Vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: postharvest-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    networks:
+      - scraper-network
+
+  # Ollama - LLM serving (Optional - uncomment if using Ollama instead of OpenAI)
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: postharvest-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   environment:
+  #     - OLLAMA_HOST=0.0.0.0:11434
+  #   # Uncomment if you have NVIDIA GPU
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: 1
+  #   #           capabilities: [gpu]
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   networks:
+  #     - scraper-network
+
+  # Ollama model puller (runs once) - Uncomment if using Ollama
+  # ollama-setup:
+  #   image: ollama/ollama:latest
+  #   container_name: postharvest-ollama-setup
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
+  #   entrypoint: ["/bin/sh", "-c"]
+  #   command:
+  #     - |
+  #       echo "Waiting for Ollama to be ready..."
+  #       sleep 10
+  #       echo "Pulling llama3.1:8b model..."
+  #       ollama pull llama3.1:8b
+  #       echo "Model pulled successfully!"
+  #   environment:
+  #     - OLLAMA_HOST=ollama:11434
+  #   networks:
+  #     - scraper-network
+  #   restart: "no"
+
+  # Prefect Server (optional - for local development)
+  prefect-server:
+    image: prefecthq/prefect:2-python3.11
+    container_name: postharvest-prefect
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_API_URL: http://localhost:4200/api
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    volumes:
+      - prefect_data:/root/.prefect
+    networks:
+      - scraper-network
+
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  prefect_data:
+    driver: local
+  # ollama_data:  # Uncomment if using Ollama
+  #   driver: local
+
+networks:
+  scraper-network:
+    driver: bridge

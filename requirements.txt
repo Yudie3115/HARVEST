@@ -1,0 +1,49 @@
+# Post-Harvest Knowledge Scraper Requirements
+# 
+# Recommended: Use Poetry (pyproject.toml)
+# Alternative: pip install -r requirements.txt
+
+# Core dependencies
+prefect>=2.14.0
+openai>=1.0.0
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-openai>=0.0.5
+
+# Web scraping
+playwright>=1.40.0
+scrapy>=2.11.0
+httpx[http2]>=0.25.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Content extraction
+trafilatura>=1.6.0
+PyMuPDF>=1.23.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+yt-dlp>=2023.12.0
+
+# AI/ML
+sentence-transformers>=2.2.0
+
+# Storage
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+minio>=7.2.0
+qdrant-client>=1.7.0
+
+# UI
+streamlit>=1.29.0
+plotly>=5.18.0
+pandas>=2.1.0
+
+# Utils
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+loguru>=0.7.0
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+tqdm>=4.66.0

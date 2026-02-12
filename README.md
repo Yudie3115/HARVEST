@@ -74,8 +74,8 @@ Pipeline       Pipeline
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
 | **Orchestration** | Prefect 2.x | Workflow management, scheduling |
-| **LLM** | Llama 3.1 (Ollama) | Content classification, extraction |
-| **Embeddings** | sentence-transformers | Semantic search |
+| **LLM** | OpenAI (primary), Ollama (optional) | Content classification, extraction |
+| **Embeddings** | OpenAI or sentence-transformers | Semantic search |
 | **Database** | PostgreSQL | Metadata, crawl state |
 | **Object Storage** | MinIO | Document storage |
 | **Vector DB** | Qdrant | Semantic search |
@@ -127,17 +127,22 @@ Edit `src/config/site_configs.py` to:
 
 Key settings in `.env`:
 ```bash
-# LLM
-OLLAMA_MODEL=llama3.1:8b
-RELEVANCE_THRESHOLD=6.0
+# LLM Provider
+LLM_PROVIDER=openai  # or ollama
+OPENAI_API_KEY=your-key-here
+OPENAI_MODEL=gpt-4o-mini
+
+# Embeddings
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
 
 # Crawling
 CRAWL_MAX_DEPTH=4
 CRAWL_DELAY_SECONDS=2.0
 
 # Processing
+RELEVANCE_THRESHOLD=6.0
 CHUNK_SIZE=1000
-EMBEDDING_MODEL=all-MiniLM-L6-v2
 ```
 
 ## 📊 Monitoring
