@@ -112,7 +112,7 @@ def refresh_vector_index() -> Dict:
     description="Full pipeline: discover → process → quality check",
 )
 def main_scraper_flow(
-    sites: List[str] = None,
+    sites: Optional[List[str]] = None,
     max_documents: int = 200,
     run_discovery: bool = True,
     run_processing: bool = True,
@@ -191,7 +191,7 @@ def main_scraper_flow(
     name="incremental_update",
     description="Lightweight update: discover new content without full reprocessing",
 )
-def incremental_update_flow(site_name: str = None) -> Dict:
+def incremental_update_flow(site_name: Optional[str] = None) -> Dict:
     """
     Incremental update for one or all sites – only discovers new URLs and
     processes documents that haven't been processed yet.

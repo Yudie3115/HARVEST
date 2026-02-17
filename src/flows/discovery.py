@@ -288,32 +288,39 @@ def discover_content(site_name: str) -> Dict:
         raise
 
 
-@flow(
-    name="discover_all_sites",
-    task_runner=ConcurrentTaskRunner()
-)
+@flow(name="discover_all_sites")
 def discover_all_sites() -> List[Dict]:
     """
-    Run discovery for all enabled sites in parallel
-    
+    Run discovery for all enabled sites.
+
+    Sites are processed sequentially. In Prefect 2.x, subflows (other @flow
+    functions) cannot be submitted with .submit() – that API is task-only.
+    For parallel site crawls deploy each flow run separately via the Prefect
+    work pool and start multiple workers.
+
     Returns:
         List of summary statistics for each site
     """
     enabled_sites = settings.enabled_sites
     logger.info(f"Starting discovery for {len(enabled_sites)} sites")
-    
-    # Submit all sites concurrently
-    futures = [
-        discover_content.submit(site)
-        for site in enabled_sites
-    ]
-    
-    # Collect results
-    results = [future.result() for future in futures]
-    
-    total_docs = sum(r['documents_stored'] for r in results)
+
+    results = []
+    for site in enabled_sites:
+        try:
+            result = discover_content(site)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Discovery failed for {site}: {e}")
+            results.append({
+                "site_name": site,
+                "status": "failed",
+                "urls_discovered": 0,
+                "documents_stored": 0,
+            })
+
+    total_docs = sum(r.get("documents_stored", 0) for r in results)
     logger.info(f"All discoveries complete. Total documents: {total_docs}")
-    
+
     return results
 
 

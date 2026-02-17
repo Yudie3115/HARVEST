@@ -1,9 +1,8 @@
 """
 Processing pipeline – download, extract, classify, chunk, embed, and store documents
 """
-import io
 import tempfile
-from datetime import timedelta, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 from uuid import UUID
@@ -11,7 +10,6 @@ from uuid import UUID
 import httpx
 from loguru import logger
 from prefect import flow, task
-from prefect.task_runners import ConcurrentTaskRunner
 
 from src.config.settings import settings
 from src.llm.client import LLMClient
@@ -336,7 +334,8 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
         # 1. Download
         download_result = download_document(document_id, url)
         if not download_result:
-            raise RuntimeError(f"Download failed for {url}")
+            # download_document already logged the error and set status to FAILED
+            return {"document_id": document_id, "url": url, "status": "failed", "chunks": 0}
 
         # 2. Extract
         text = extract_content(download_result, url=url)
@@ -383,20 +382,22 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
         raise
 
 
-@flow(
-    name="process_documents_batch",
-    task_runner=ConcurrentTaskRunner(),
-)
+@flow(name="process_documents_batch")
 def process_documents_batch(
     documents: List[Dict],
     max_concurrent: int = 5,
 ) -> List[Dict]:
     """
-    Process a batch of documents, up to max_concurrent at a time.
+    Process a batch of documents sequentially.
+
+    In Prefect 2.x, @flow objects do not have .submit() – that API is
+    task-only. Documents are therefore processed one at a time. For
+    parallel processing, deploy flows to a work pool and run multiple
+    workers (``prefect worker start --pool <pool> --limit <n>``).
 
     Args:
         documents:      List of dicts with keys: id, url, site_name
-        max_concurrent: Maximum parallel processing tasks
+        max_concurrent: Reserved for future use (ignored in this version)
 
     Returns:
         List of per-document result dicts
@@ -404,22 +405,17 @@ def process_documents_batch(
     logger.info(f"Processing batch of {len(documents)} documents")
 
     results = []
-    for i in range(0, len(documents), max_concurrent):
-        batch = documents[i : i + max_concurrent]
-        futures = [
-            process_document.submit(
+    for doc in documents:
+        try:
+            result = process_document(
                 document_id=str(doc["id"]),
                 url=doc["url"],
                 site_name=doc.get("site_name", ""),
             )
-            for doc in batch
-        ]
-        for future in futures:
-            try:
-                results.append(future.result())
-            except Exception as e:
-                logger.error(f"Document processing failed in batch: {e}")
-                results.append({"status": "failed", "error": str(e)})
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Document processing failed for {doc.get('url')}: {e}")
+            results.append({"status": "failed", "error": str(e)})
 
     processed = sum(1 for r in results if r.get("status") == "processed")
     logger.info(f"Batch complete: {processed}/{len(documents)} documents processed")
