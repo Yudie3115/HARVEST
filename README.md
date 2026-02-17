@@ -295,7 +295,7 @@ docker exec -it postharvest-postgres psql -U scraper -d postharvest_scraper -c "
 
 ## 🤝 Contributing
 
-Built by **[Fourlanes](https://fourlanes.co)** for agricultural knowledge systems in Africa.
+Built by **[Fourlanes](https://fourlanes.tech)** for agricultural knowledge systems in Africa.
 
 Contributions welcome! Please:
 1. Fork the repository
@@ -317,8 +317,8 @@ Contributions welcome! Please:
 ## 📧 Contact
 
 **Fourlanes Digital Studio**
-- Website: https://fourlanes.co
-- Email: edwin@fourlanes.co
+- Website: https://fourlanes.tech
+- Email: edwinm@fourlanes.tech
 
 ---
 

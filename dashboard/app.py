@@ -4,185 +4,374 @@ Post-Harvest Knowledge Scraper Dashboard
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 st.set_page_config(
     page_title="Post-Harvest Scraper Dashboard",
     page_icon="🌾",
-    layout="wide"
+    layout="wide",
 )
 
+
+# ---------------------------------------------------------------------------
+# Data helpers (lazy connection – gracefully handles DB being offline)
+# ---------------------------------------------------------------------------
+
+@st.cache_resource(ttl=60)
+def _get_db():
+    try:
+        from src.storage.postgres import PostgresClient
+        return PostgresClient()
+    except Exception:
+        return None
+
+
+@st.cache_resource(ttl=60)
+def _get_vector_db():
+    try:
+        from src.storage.vector_db import VectorDBClient
+        return VectorDBClient()
+    except Exception:
+        return None
+
+
+@st.cache_resource(ttl=60)
+def _get_llm():
+    try:
+        from src.llm.client import LLMClient
+        return LLMClient()
+    except Exception:
+        return None
+
+
+def _get_stats() -> Dict:
+    db = _get_db()
+    if db is None:
+        return {"total_documents": 0, "processed_documents": 0, "processing_rate": 0}
+    try:
+        return db.get_crawl_stats()
+    except Exception:
+        return {"total_documents": 0, "processed_documents": 0, "processing_rate": 0}
+
+
+def _get_recent_documents(site_name: Optional[str] = None, limit: int = 50) -> List:
+    db = _get_db()
+    if db is None:
+        return []
+    try:
+        return db.get_documents(site_name=site_name, limit=limit)
+    except Exception:
+        return []
+
+
+def _check_connections() -> Dict[str, bool]:
+    results = {}
+
+    # PostgreSQL
+    try:
+        from src.storage.postgres import PostgresClient
+        db = PostgresClient()
+        db.get_crawl_stats()
+        results["PostgreSQL"] = True
+    except Exception:
+        results["PostgreSQL"] = False
+
+    # MinIO
+    try:
+        from src.storage.minio_client import MinIOClient
+        m = MinIOClient()
+        m.list_objects()
+        results["MinIO"] = True
+    except Exception:
+        results["MinIO"] = False
+
+    # Qdrant
+    try:
+        from src.storage.vector_db import VectorDBClient
+        v = VectorDBClient()
+        results["Qdrant"] = v.check_connection()
+    except Exception:
+        results["Qdrant"] = False
+
+    # LLM
+    try:
+        from src.llm.client import LLMClient
+        llm = LLMClient()
+        results["LLM Service"] = llm.check_connection()
+    except Exception:
+        results["LLM Service"] = False
+
+    # Prefect
+    try:
+        import httpx
+        from src.config.settings import settings
+        r = httpx.get(settings.prefect_api_url + "/health", timeout=5)
+        results["Prefect"] = r.status_code == 200
+    except Exception:
+        results["Prefect"] = False
+
+    return results
+
+
+def _semantic_search(query: str, top_k: int = 10) -> List[Dict]:
+    try:
+        from src.llm.embeddings import EmbeddingClient
+        from src.storage.vector_db import VectorDBClient
+
+        embedder = EmbeddingClient()
+        query_vec = embedder.embed(query)
+
+        vector_db = VectorDBClient()
+        return vector_db.search(query_vec, top_k=top_k)
+    except Exception as e:
+        st.error(f"Search failed: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Sidebar
+# ---------------------------------------------------------------------------
+
 with st.sidebar:
     st.title("🌾 Post-Harvest Scraper")
     st.write("AI-powered knowledge base builder")
-    
+
     st.divider()
-    
+
     st.subheader("Quick Actions")
     if st.button("▶️ Run Full Crawl", use_container_width=True):
-        st.info("Prefect flow integration coming soon...")
-    
+        try:
+            from prefect.deployments import run_deployment
+            run_deployment("post_harvest_scraper/daily-scraper-production")
+            st.success("Full crawl triggered!")
+        except Exception as e:
+            st.error(f"Could not trigger flow: {e}")
+
     if st.button("🔄 Incremental Update", use_container_width=True):
-        st.info("Prefect flow integration coming soon...")
-    
+        try:
+            from prefect.deployments import run_deployment
+            run_deployment("incremental_update/incremental-update-production")
+            st.success("Incremental update triggered!")
+        except Exception as e:
+            st.error(f"Could not trigger flow: {e}")
+
     st.divider()
-    
-    # Site filter
+
     st.subheader("Filters")
     selected_sites = st.multiselect(
         "Sites:",
         ["naro", "agriculture", "extension", "ubos"],
-        default=["naro", "agriculture", "extension", "ubos"]
+        default=["naro", "agriculture", "extension", "ubos"],
     )
 
+# ---------------------------------------------------------------------------
 # Main content
+# ---------------------------------------------------------------------------
+
 st.title("📊 Post-Harvest Knowledge Scraper")
 st.caption("Real-time monitoring and management dashboard")
 
-# Tabs
-tab1, tab2, tab3 = st.tabs(["📊 Overview", "📄 Documents", "⚙️ Configuration"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📊 Overview", "📄 Documents", "🔍 Search", "⚙️ Configuration"]
+)
+
+# ---------------------------------------------------------------------------
+# Tab 1: Overview
+# ---------------------------------------------------------------------------
 
 with tab1:
     st.subheader("System Overview")
-    
-    # Metrics
+
+    stats = _get_stats()
+
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        st.metric(
-            label="Total Documents",
-            value="0",
-            delta="Waiting for data..."
-        )
-    
+        st.metric("Total Documents", stats.get("total_documents", 0))
     with col2:
-        st.metric(
-            label="Processed Today",
-            value="0",
-            delta="0%"
-        )
-    
+        st.metric("Processed", stats.get("processed_documents", 0))
     with col3:
-        st.metric(
-            label="Avg Relevance",
-            value="0.00",
-            delta="N/A"
-        )
-    
+        rate = stats.get("processing_rate", 0)
+        st.metric("Processing Rate", f"{rate:.0%}")
     with col4:
-        st.metric(
-            label="Storage Used",
-            value="0 GB",
-            delta="N/A"
-        )
-    
+        # Vector index size
+        try:
+            vdb = _get_vector_db()
+            info = vdb.get_collection_info() if vdb else {}
+            st.metric("Vectors Indexed", info.get("vectors_count", 0))
+        except Exception:
+            st.metric("Vectors Indexed", "N/A")
+
     st.divider()
-    
-    # Status message
-    st.info("""
-    👋 **Welcome to the Post-Harvest Knowledge Scraper!**
-    
-    This dashboard will display:
-    - Real-time crawl statistics
-    - Document processing status
-    - Search capabilities
-    - System configuration
-    
-    **Next steps:**
-    1. Run `scripts/init_db.py` to initialize the database
-    2. Start a crawl using the Prefect flows
-    3. Return here to monitor progress
-    
-    *Dashboard features are being implemented...*
-    """)
-    
-    # Placeholder chart
+
+    # Recent crawl activity (last 30 days – approximate from DB)
     st.subheader("Crawl Activity")
-    chart_data = pd.DataFrame({
-        'date': pd.date_range(start='2024-01-01', periods=30, freq='D'),
-        'discovered': [0] * 30,
-        'processed': [0] * 30
-    })
-    st.line_chart(chart_data.set_index('date'))
+    docs = _get_recent_documents(limit=200)
+    if docs:
+        dates = [
+            d.discovered_at.date() if d.discovered_at else datetime.utcnow().date()
+            for d in docs
+        ]
+        date_counts = pd.Series(dates).value_counts().sort_index()
+        chart_df = pd.DataFrame({
+            "date": date_counts.index,
+            "documents": date_counts.values,
+        }).set_index("date")
+        st.line_chart(chart_df)
+    else:
+        st.info("No crawl data yet. Run a crawl to see activity here.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 2: Documents
+# ---------------------------------------------------------------------------
 
 with tab2:
     st.subheader("Documents")
-    
-    # Filters
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        topic_filter = st.selectbox("Topic", ["All", "storage", "drying", "pest_management"])
+        site_filter = st.selectbox(
+            "Site", ["All"] + ["naro", "agriculture", "extension", "ubos"]
+        )
     with col2:
-        status_filter = st.selectbox("Status", ["All", "discovered", "processed", "failed"])
+        status_filter = st.selectbox(
+            "Status", ["All", "discovered", "queued", "processing", "processed", "failed", "skipped"]
+        )
     with col3:
-        sort_by = st.selectbox("Sort by", ["Relevance", "Date", "Site"])
-    
-    st.info("Document database integration pending. Run a crawl to see documents here.")
-    
-    # Placeholder table
-    st.dataframe(
-        pd.DataFrame({
-            'Title': ['Document 1', 'Document 2'],
-            'Site': ['naro', 'agriculture'],
-            'Type': ['PDF', 'HTML'],
-            'Relevance': [8.5, 7.2],
-            'Status': ['discovered', 'discovered']
-        }),
-        use_container_width=True
-    )
+        sort_by = st.selectbox("Sort by", ["Discovered (newest)", "Relevance"])
+
+    site_arg = None if site_filter == "All" else site_filter
+    docs = _get_recent_documents(site_name=site_arg, limit=100)
+
+    if not docs:
+        st.info("No documents found. Run a crawl to populate the database.")
+    else:
+        rows = []
+        for doc in docs:
+            meta = doc.extra_metadata or {}
+            llm_cls = meta.get("llm_classification", {})
+            rows.append({
+                "Title": doc.title or "Untitled",
+                "Site": doc.site_name,
+                "Type": doc.document_type or "unknown",
+                "Status": doc.status.value if doc.status else "unknown",
+                "Relevance": llm_cls.get("relevance_score", "-"),
+                "Discovered": (
+                    doc.discovered_at.strftime("%Y-%m-%d %H:%M")
+                    if doc.discovered_at
+                    else "N/A"
+                ),
+                "URL": doc.url,
+            })
+
+        df = pd.DataFrame(rows)
+        if sort_by == "Relevance":
+            df = df.sort_values("Relevance", ascending=False)
+
+        st.dataframe(df, use_container_width=True)
+        st.caption(f"Showing {len(df)} documents")
+
+
+# ---------------------------------------------------------------------------
+# Tab 3: Semantic Search
+# ---------------------------------------------------------------------------
 
 with tab3:
+    st.subheader("🔍 Search Knowledge Base")
+
+    query = st.text_input(
+        "Search for post-harvest information:",
+        placeholder="e.g. maize storage best practices",
+    )
+    top_k = st.slider("Results", min_value=3, max_value=20, value=10)
+
+    if query:
+        with st.spinner("Searching…"):
+            results = _semantic_search(query, top_k=top_k)
+
+        if results:
+            st.write(f"Found **{len(results)}** relevant chunks")
+            for res in results:
+                payload = res.get("payload", {})
+                score = res.get("score", 0)
+                with st.expander(
+                    f"[{score:.3f}] {payload.get('source_url', 'Unknown source')}"
+                ):
+                    st.write(payload.get("text", ""))
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.caption(f"Topics: {', '.join(payload.get('topics', []) or ['-'])}")
+                        st.caption(f"Crops: {', '.join(payload.get('crops', []) or ['-'])}")
+                    with col2:
+                        st.caption(f"Type: {payload.get('document_type', 'N/A')}")
+                        st.caption(
+                            f"Relevance: {payload.get('relevance_score', 'N/A')}"
+                        )
+        else:
+            st.info(
+                "No results found. Make sure documents have been processed and "
+                "embedded before searching."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Tab 4: Configuration
+# ---------------------------------------------------------------------------
+
+with tab4:
     st.subheader("⚙️ System Configuration")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.write("**LLM Settings**")
-        llm_provider = st.selectbox(
-            "Provider",
-            ["openai", "ollama"],
-            help="LLM provider for content classification"
-        )
-        
+        llm_provider = st.selectbox("Provider", ["openai", "ollama"])
         if llm_provider == "openai":
             model = st.selectbox("Model", ["gpt-4o-mini", "gpt-4o"])
             st.caption("💡 gpt-4o-mini recommended for cost/performance")
         else:
             model = st.selectbox("Model", ["llama3.1:8b", "llama3.1:70b"])
             st.caption("⚠️ Requires Ollama service running")
-        
         temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.1)
-    
+
     with col2:
         st.write("**Crawl Settings**")
         max_depth = st.number_input("Max Depth", 1, 10, 4)
         rate_limit = st.number_input("Rate Limit (req/s)", 0.5, 10.0, 2.0, 0.5)
         relevance_threshold = st.slider(
-            "Relevance Threshold",
-            0.0, 10.0, 6.0, 0.5,
-            help="Only process documents above this score"
+            "Relevance Threshold", 0.0, 10.0, 6.0, 0.5,
+            help="Only process documents above this score",
         )
-    
+
     st.divider()
-    
     if st.button("💾 Save Configuration", type="primary"):
-        st.success("Configuration saved! (Feature in development)")
-    
+        st.info(
+            "Runtime configuration changes via the dashboard are not yet persisted. "
+            "Update your .env file and restart the services to apply changes."
+        )
+
     st.divider()
-    
+
     # System status
     st.subheader("System Status")
-    
-    status_data = {
-        "Component": ["PostgreSQL", "MinIO", "Qdrant", "LLM Service", "Prefect"],
-        "Status": ["🔴 Not Connected", "🔴 Not Connected", "🔴 Not Connected", "🔴 Not Connected", "🔴 Not Connected"],
-        "Last Check": ["N/A"] * 5
-    }
-    st.dataframe(pd.DataFrame(status_data), use_container_width=True)
-    
+
     if st.button("🔄 Check Connections"):
-        st.info("Connection check integration coming soon...")
+        with st.spinner("Checking…"):
+            status = _check_connections()
+
+        status_rows = [
+            {
+                "Component": name,
+                "Status": "🟢 Connected" if ok else "🔴 Not Connected",
+            }
+            for name, ok in status.items()
+        ]
+        st.dataframe(pd.DataFrame(status_rows), use_container_width=True)
+    else:
+        st.caption("Click 'Check Connections' to test service connectivity.")
 
 # Footer
 st.divider()
-st.caption("Built by [Fourlanes](https://fourlanes.co) | Post-Harvest Knowledge Scraper v0.1.0")
+st.caption(
+    "Built by [Fourlanes](https://fourlanes.tech) | Post-Harvest Knowledge Scraper v0.2.0"
+)

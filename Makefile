@@ -70,4 +70,7 @@ clean:
 	rm -rf logs/*.log
 
 test:
-	poetry run pytest tests/ -v
+	poetry run pytest tests/ -v --tb=short
+
+test-fast:
+	poetry run pytest tests/ -q

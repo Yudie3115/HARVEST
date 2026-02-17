@@ -1,4 +1,4 @@
-# Post-Harvest Knowledge Scraper - Quick Start Guide
+# Post-Harvest Knowledge Scraper – Quick Start Guide
 
 ## Prerequisites
 
@@ -6,592 +6,605 @@
 - **Docker & Docker Compose**
 - **Git**
 - **OpenAI API Key** (recommended) OR
-- **16GB RAM minimum** (if using Ollama locally)
-- **100GB+ disk space** for documents and vector database
+- **16 GB RAM minimum** (if using Ollama locally)
+- **100 GB+ disk space** for documents and vector database
 
 Optional:
-- **NVIDIA GPU** with 8GB+ VRAM (only if using Ollama - significantly speeds up LLM inference)
+- **NVIDIA GPU** with 8 GB+ VRAM (only if using Ollama – significantly speeds up LLM inference)
 
 ---
 
 ## Installation
 
-### 1. Clone and Setup
+### 1. Clone and set up
 
 ```bash
-# Clone repository (or create new directory)
-mkdir postharvest-scraper
-cd postharvest-scraper
+git clone <repo-url>
+cd post-harvest-knowledge-scraper
 
 # Install Poetry (if not already installed)
 curl -sSL https://install.python-poetry.org | python3 -
 
-# Install dependencies (Poetry creates and manages the virtualenv automatically)
+# Install all dependencies
 poetry install
 ```
 
-### 2. Start Infrastructure
+### 2. Start infrastructure
 
 ```bash
-# Start core services (PostgreSQL, MinIO, Qdrant, Prefect)
-docker-compose up -d
+# Start all services (PostgreSQL, MinIO, Qdrant, Prefect)
+docker compose up -d
 
-# Check services are running
-docker-compose ps
-
-# Expected output:
-# NAME                     STATUS
-# postharvest-postgres     Up (healthy)
-# postharvest-minio        Up (healthy)
-# postharvest-qdrant       Up
-# postharvest-prefect      Up
-
-# Note: Ollama is optional and commented out by default
-# Uncomment Ollama services in docker-compose.yml if needed
+# Check that services are healthy
+docker compose ps
 ```
 
-### 3. Configure Environment
+Expected output:
+
+```
+NAME                     STATUS
+postharvest-postgres     Up (healthy)
+postharvest-minio        Up (healthy)
+postharvest-qdrant       Up
+postharvest-prefect      Up
+```
+
+> Ollama is optional. Uncomment the Ollama service in `docker-compose.yml` if you
+> prefer a fully local, zero-cost LLM setup.
+
+### 3. Configure environment
 
 ```bash
-# Copy environment template
 cp .env.example .env
-
-# Edit .env with your settings
-nano .env
-
-# IMPORTANT: Add your OpenAI API key
-OPENAI_API_KEY=sk-...your-key-here...
-
-# Or, if using Ollama:
-# 1. Uncomment Ollama services in docker-compose.yml
-# 2. Set LLM_PROVIDER=ollama in .env
-# 3. Start Ollama: docker-compose up -d ollama
+# Edit .env and add your OpenAI key:
+# OPENAI_API_KEY=sk-...
 ```
 
-### 4. Initialize Database
+For a **fully local, no-cost** setup using Ollama instead:
 
 ```bash
-# Create database schema
-poetry run python scripts/init_db.py
+# In .env:
+LLM_PROVIDER=ollama
+EMBEDDING_PROVIDER=local
 
-# Expected output:
-# ✓ Connected to PostgreSQL
-# ✓ Created tables: crawl_runs, documents, document_classifications, ...
-# ✓ Created indexes
-# ✓ Database initialized successfully
-```
-
-### 5. Verify LLM Setup
-
-**If using OpenAI (recommended):**
-
-```bash
-# Test OpenAI API connection
-poetry run python -c "
-from openai import OpenAI
-import os
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-response = client.chat.completions.create(
-    model='gpt-4o-mini',
-    messages=[{'role': 'user', 'content': 'test'}],
-    max_tokens=5
-)
-print('✓ OpenAI connection successful')
-"
-```
-
-**If using Ollama (optional):**
-
-```bash
-# Check Ollama is running and model is loaded
-docker exec postharvest-ollama ollama list
-
-# Should show: llama3.1:8b
-
-# Test Ollama API
-curl http://localhost:11434/api/tags
-
-# If model isn't loaded, pull it:
+# Uncomment Ollama in docker-compose.yml, then:
+docker compose up -d ollama
 docker exec postharvest-ollama ollama pull llama3.1:8b
+```
+
+### 4. Initialise the database
+
+```bash
+poetry run python scripts/init_db.py
+```
+
+Expected output:
+```
+✓ Connected to PostgreSQL
+✓ Created tables: crawl_runs, documents, document_classifications, ...
+✓ Database initialized successfully
 ```
 
 ---
 
-## Quick Test Run
+## Testing
 
-### Test 1: Single Site Discovery
+### All-in-one feature smoke test
+
+Once all services are running (`docker compose up -d`) and the database is
+initialised, run the smoke test to verify every feature works end-to-end:
 
 ```bash
-# Run discovery for NARO site
+poetry run python scripts/smoke_test.py
+```
+
+This will run through **6 sections** in order, printing `✓ PASS` or `✗ FAIL`
+for each check:
+
+```
+🌾  Post-Harvest Scraper – Feature Smoke Test
+════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────
+  1 / 6  Infrastructure Connectivity
+──────────────────────────────────────────────────────────────
+  ✓ PASS  PostgreSQL connection
+  ✓ PASS  MinIO connection
+  ✓ PASS  Qdrant connection
+  ✓ PASS  LLM connection
+  ✓ PASS  Embedding service
+           → dimension: 1536
+
+──────────────────────────────────────────────────────────────
+  2 / 6  Content Extraction
+──────────────────────────────────────────────────────────────
+  ✓ PASS  HTML extraction (trafilatura/BS4)
+  ✓ PASS  Text chunking
+           → 4 chunks produced
+
+──────────────────────────────────────────────────────────────
+  3 / 6  LLM Classification
+──────────────────────────────────────────────────────────────
+  ✓ PASS  URL classification
+           → top relevance score: 8.5/10
+  ✓ PASS  Content classification
+           → relevance score: 9.0/10
+
+──────────────────────────────────────────────────────────────
+  4 / 6  Vector DB Roundtrip (embed → store → search)
+──────────────────────────────────────────────────────────────
+  ✓ PASS  Embed + upsert + search + delete
+           → 5 results returned
+
+──────────────────────────────────────────────────────────────
+  5 / 6  Discovery Pipeline (live crawl of NARO)
+──────────────────────────────────────────────────────────────
+  ✓ PASS  Crawl + LLM classify + DB store
+           → 152 URLs, 43 stored
+
+──────────────────────────────────────────────────────────────
+  6 / 6  Processing Pipeline (download → extract → embed → store)
+──────────────────────────────────────────────────────────────
+  ✓ PASS  Process one document end-to-end
+           → status: processed, chunks: 8
+
+Results: 11/11 passed (0 skipped, 0 failed)
+
+  All checks passed!
+```
+
+Flags:
+
+| Flag | Effect |
+|------|--------|
+| `--skip-crawl` | Skip the live crawl (sections 1–4 only, ~10 s) |
+| `--skip-process` | Skip the processing pipeline test |
+
+For the fastest infrastructure-only check:
+
+```bash
+poetry run python scripts/smoke_test.py --skip-crawl --skip-process
+```
+
+---
+
+### Step-by-step (for onboarding / debugging)
+
+The smoke test above runs everything automatically. If you prefer to validate
+each layer manually, use the steps below.
+
+### Unit tests (no services required)
+
+The test suite runs entirely with mocks – no live database, LLM API, or Docker
+services needed.
+
+```bash
+poetry run pytest tests/ -v
+```
+
+Expected output:
+```
+62 passed in ~2s
+```
+
+Test coverage by module:
+
+| File | What is tested |
+|------|---------------|
+| `tests/test_utils.py` | Hashing, text cleaning, chunking, keyword matching |
+| `tests/test_extractors.py` | HTML extraction, PDF parsing, VTT parsing, video metadata |
+| `tests/test_llm.py` | URL classification, content classification, prompt builders, embeddings |
+| `tests/test_storage.py` | VectorDBClient (Qdrant), PostgresClient – all with mocks |
+
+Run a single test file:
+
+```bash
+poetry run pytest tests/test_utils.py -v
+```
+
+Run a single test by name:
+
+```bash
+poetry run pytest tests/test_llm.py::TestLLMClient::test_classify_urls_returns_list -v
+```
+
+### Smoke tests (services must be running)
+
+These commands verify each component end-to-end. Run `docker compose up -d` first.
+
+**1. LLM connection**
+
+```bash
+# OpenAI
+poetry run python -c "
+from src.llm.client import LLMClient
+llm = LLMClient()
+print('Connected:', llm.check_connection())
+"
+
+# Ollama (if configured)
+curl -s http://localhost:11434/api/tags | python3 -m json.tool
+```
+
+**2. Embedding generation**
+
+```bash
+poetry run python -c "
+from src.llm.embeddings import EmbeddingClient
+embedder = EmbeddingClient()
+vec = embedder.embed('Post-harvest storage of maize')
+print(f'Embedding dim: {len(vec)}')  # 1536 (OpenAI) or 384 (local)
+"
+```
+
+**3. Database connectivity**
+
+```bash
+poetry run python -c "
+from src.storage.postgres import PostgresClient
+db = PostgresClient()
+stats = db.get_crawl_stats()
+print('DB stats:', stats)
+"
+
+# Direct psql
+docker exec -it postharvest-postgres psql -U scraper -d postharvest_scraper -c '\dt'
+```
+
+**4. MinIO (object storage)**
+
+```bash
+poetry run python -c "
+from src.storage.minio_client import MinIOClient
+m = MinIOClient()
+print('Bucket objects:', m.list_objects()[:5])
+"
+
+# Browser: http://localhost:9001  (user: minioadmin / pass: minioadmin123)
+```
+
+**5. Qdrant (vector database)**
+
+```bash
+# REST health check
+curl -s http://localhost:6333/collections | python3 -m json.tool
+
+poetry run python -c "
+from src.storage.vector_db import VectorDBClient
+vdb = VectorDBClient()
+vdb.ensure_collection()
+print('Connected:', vdb.check_connection())
+print('Collection info:', vdb.get_collection_info())
+"
+```
+
+**6. Dashboard connection checker**
+
+```bash
+poetry run streamlit run dashboard/app.py
+# Open http://localhost:8501 → Configuration tab → "Check Connections"
+```
+
+### Component integration smoke tests
+
+After the database is initialised you can run a full discovery pass against a
+single site without needing all services:
+
+```bash
+# Single-site discovery (requires DB + internet access + LLM)
 poetry run python -c "
 from src.flows.discovery import discover_content
 result = discover_content('naro')
 print(result)
 "
-
-# Expected output:
-# Starting discovery flow for naro
-# Crawl complete: 150 URLs discovered from NARO
-# Classifying 150 URLs with LLM
-# Filtered 45 relevant URLs (threshold: 6.0)
-# Stored 45 documents in database
-# Discovery complete: {'documents_stored': 45, ...}
+# Expected: {'urls_discovered': ~150, 'documents_stored': ~40, 'status': 'completed'}
 ```
 
-### Test 2: Check Database
+Process a single document (requires DB + MinIO + Qdrant + LLM):
 
 ```bash
-# Connect to PostgreSQL
-docker exec -it postharvest-postgres psql -U scraper -d postharvest_scraper
-
-# Query discovered documents
-SELECT 
-    site_name,
-    COUNT(*) as doc_count,
-    AVG((metadata->>'relevance_score')::float) as avg_relevance
-FROM documents
-GROUP BY site_name;
-
-# Exit psql
-\q
+poetry run python -c "
+from src.flows.processing import process_document
+# Use a real document_id from your DB, e.g.:
+from src.storage.postgres import PostgresClient
+from src.storage.models import DocumentStatus
+db = PostgresClient()
+docs = db.get_documents(status=DocumentStatus.DISCOVERED, limit=1)
+if docs:
+    doc = docs[0]
+    result = process_document(str(doc.id), doc.url)
+    print(result)
+"
 ```
-
-### Test 3: Check MinIO Storage
-
-Open browser to: http://localhost:9001
-- Username: `minioadmin`
-- Password: `minioadmin123`
-
-You should see the `postharvest-documents` bucket (will be created on first document download).
 
 ---
 
 ## Running Full Workflows
 
-### Option A: Using Prefect UI (Recommended)
+### Option A: Prefect UI (recommended)
 
-1. **Start Prefect Server** (if not already running via docker-compose)
+1. Open **http://localhost:4200** (Prefect UI, started by docker compose)
+
+2. Deploy the flows with their schedules:
+   ```bash
+   poetry run python scripts/deploy_flows.py
+   # For a non-production environment:
+   poetry run python scripts/deploy_flows.py --env development
+   ```
+
+3. Start a Prefect worker to execute flows:
+   ```bash
+   poetry run prefect worker start --pool postharvest-pool
+   ```
+
+4. Trigger manually from the UI or CLI:
+   ```bash
+   poetry run prefect deployment run 'post_harvest_scraper/daily-scraper-production'
+   ```
+
+### Option B: Command line
 
 ```bash
-poetry run prefect server start
-```
-
-2. **Open Prefect UI**: http://localhost:4200
-
-3. **Deploy Flows**
-
-```bash
-poetry run python scripts/deploy_flows.py
-```
-
-4. **Run from UI**:
-   - Navigate to "Flows" → "discover_all_sites"
-   - Click "Run" → "Quick run"
-   - Monitor progress in real-time
-
-### Option B: Command Line
-
-```bash
-# Run discovery for all sites
+# Discover all sites
 poetry run python -c "
 from src.flows.discovery import discover_all_sites
 results = discover_all_sites()
 for r in results:
-    print(f\"{r['site_name']}: {r['documents_stored']} docs\")
+    print(f\"{r['site_name']}: {r['documents_stored']} docs stored\")
 "
 
-# Run processing pipeline (after discovery)
+# Process all pending documents
 poetry run python -c "
-from src.flows.processing import process_documents_flow
-process_documents_flow()
+from src.flows.orchestration import main_scraper_flow
+summary = main_scraper_flow(run_discovery=False, run_processing=True)
+print(summary)
+"
+
+# Full pipeline (discovery + processing + quality check)
+poetry run python -c "
+from src.flows.orchestration import main_scraper_flow
+summary = main_scraper_flow()
+print(summary)
 "
 ```
 
-### Option C: Scheduled Runs
+### Option C: Scheduled runs (production)
 
 ```bash
-# Start Prefect agent to handle scheduled runs
-poetry run prefect agent start -q default
+# Deploy with default schedules (daily 02:00, hourly incremental, weekly retry)
+poetry run python scripts/deploy_flows.py
 
-# Deploy with schedule (runs daily at 2 AM)
-poetry run python scripts/deploy_flows.py --schedule
+# Start worker – keep this running (e.g. in a systemd service or screen)
+poetry run prefect worker start --pool postharvest-pool
 ```
 
 ---
 
-## Using the Streamlit Dashboard
-
-### Start Dashboard
+## Dashboard
 
 ```bash
 poetry run streamlit run dashboard/app.py
-
-# Or with custom port
-poetry run streamlit run dashboard/app.py --server.port 8502
+# Open http://localhost:8501
 ```
 
-### Access Dashboard
+Tabs available:
 
-Open browser to: http://localhost:8501
+| Tab | Contents |
+|-----|----------|
+| Overview | Live document counts, processing rate, vectors indexed, crawl activity chart |
+| Documents | Searchable/filterable table of all discovered documents |
+| Search | Semantic search across processed chunks in Qdrant |
+| Configuration | LLM/crawl settings, service connection health checker |
 
-**Dashboard Features:**
+---
 
-1. **Overview Tab**
-   - Real-time crawl statistics
-   - Document count by topic
-   - Recent activity timeline
+## Makefile shortcuts
 
-2. **Documents Tab**
-   - Browse discovered documents
-   - Filter by site, topic, status
-   - Download individual documents
-   - Queue for reprocessing
-
-3. **Search Tab**
-   - Semantic search across knowledge base
-   - View relevant chunks with sources
-   - Test retrieval quality
-
-4. **Analytics Tab**
-   - Topic coverage visualization
-   - Site comparison statistics
-   - Quality metrics
-
-5. **Config Tab**
-   - Adjust LLM settings
-   - Configure crawl parameters
-   - Set relevance thresholds
+```bash
+make help          # Show all available commands
+make setup         # Install deps + start Docker + init DB
+make start         # docker compose up -d
+make stop          # docker compose down
+make init-db       # Re-run database initialisation
+make db-shell      # Open psql shell
+make dashboard     # Start Streamlit dashboard
+make crawl-naro    # Run discovery for NARO site only
+make crawl-all     # Run discovery for all sites
+make test          # Run full test suite (pytest)
+make clean         # Remove __pycache__, .pyc, log files
+```
 
 ---
 
 ## Common Tasks
 
-### Add a New Site
+### Add a new site
 
 1. Edit `src/config/site_configs.py`:
 
 ```python
 SITE_CONFIGS["new_site"] = SiteConfig(
-    name="New Site Name",
+    name="New Site",
     url="https://example.go.ug/",
     strategy="recursive_crawl",
     max_depth=3,
     url_patterns=[r".*publication.*", r".*\.pdf$"],
     keywords=["post-harvest", "storage"],
     llm_filter=True,
-    rate_limit=2.0
+    rate_limit=2.0,
 )
 ```
 
-2. Enable in `.env`:
+2. Enable it in `.env`:
 
-```bash
+```
 NEW_SITE_ENABLED=true
 ```
 
 3. Run discovery:
 
 ```bash
+poetry run python -c "from src.flows.discovery import discover_content; discover_content('new_site')"
+```
+
+### Reprocess failed documents
+
+```bash
+# Prefect CLI
+poetry run prefect deployment run 'reprocess_failed/reprocess-failed-production'
+
+# Or directly
 poetry run python -c "
-from src.flows.discovery import discover_content
-discover_content('new_site')
+from src.flows.orchestration import reprocess_failed_flow
+result = reprocess_failed_flow(limit=50)
+print(result)
 "
 ```
 
-### Reprocess Failed Documents
+### Check system health
 
 ```bash
-# Via Streamlit dashboard: Documents Tab → Filter by "Failed" → Select → "Reprocess"
+# All services
+docker compose ps
 
-# Or via Python:
-poetry run python -c "
-from src.flows.processing import reprocess_failed_flow
-reprocess_failed_flow()
-"
-```
+# Logs
+docker compose logs -f                     # all services
+docker compose logs -f postgres            # single service
+tail -f logs/scraper.log                   # application log
 
-### Check System Health
+# Quick health endpoints
+curl -s http://localhost:6333/collections  # Qdrant
+curl -s http://localhost:9000/minio/health/live  # MinIO
+curl -s http://localhost:4200/api/health   # Prefect
 
-```bash
-# Check all services
-docker-compose ps
-
-# Check LLM connection (OpenAI)
-poetry run python -c "from src.llm.client import LLMClient; client = LLMClient(); client.check_connection()"
-
-# Check LLM connection (Ollama - if using)
-curl http://localhost:11434/api/tags
-
-# Check PostgreSQL
-docker exec -it postharvest-postgres pg_isready
-
-# Check MinIO
-curl http://localhost:9000/minio/health/live
-
-# Check Qdrant
-curl http://localhost:6333/collections
-```
-
-### View Logs
-
-```bash
-# View all logs
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f ollama
-docker-compose logs -f postgres
-
-# Application logs (if running locally)
-tail -f logs/scraper.log
+# Database backup
+docker exec postharvest-postgres pg_dump -U scraper postharvest_scraper > backup.sql
 ```
 
 ---
 
 ## Troubleshooting
 
-### Issue: `python: No such file or directory`
+### `ModuleNotFoundError` or `No module named 'src'`
 
-Ubuntu/Debian don't install a bare `python` command by default — only `python3`. Always use `poetry run python ...` instead of activating the venv manually. If you need a shell with `python` available:
+Always run commands through Poetry so the virtualenv is used:
+
+```bash
+poetry run python ...
+poetry run pytest ...
+poetry run streamlit ...
+```
+
+Or activate the shell once:
 
 ```bash
 poetry shell
+# then: python ..., pytest ..., etc.
 ```
 
-### Issue: LLM connection errors
+### LLM connection errors
 
-**For OpenAI:**
 ```bash
-# Verify API key is set
-echo $OPENAI_API_KEY
+# Verify OpenAI key is loaded
+poetry run python -c "from src.config.settings import settings; print(bool(settings.openai_api_key))"
 
-# Test connection
+# Quick connection test
+poetry run python -c "from src.llm.client import LLMClient; LLMClient().check_connection()"
+```
+
+### PostgreSQL connection refused
+
+```bash
+docker compose ps postgres
+docker compose logs postgres
+docker compose restart postgres
+docker exec -it postharvest-postgres pg_isready
+```
+
+### Qdrant errors
+
+```bash
+curl http://localhost:6333/collections
+docker compose restart qdrant
+
+# If collection is corrupt, recreate it:
 poetry run python -c "
-from openai import OpenAI
-import os
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-print(client.models.list())
+from src.storage.vector_db import VectorDBClient
+VectorDBClient().ensure_collection(recreate=True)
 "
 ```
 
-**For Ollama:**
-```bash
-# Check if container is running
-docker-compose ps ollama
+### Slow LLM inference (Ollama)
 
-# Pull model manually
-docker exec postharvest-ollama ollama pull llama3.1:8b
-
-# Check available models
-docker exec postharvest-ollama ollama list
-
-# If GPU not detected, Ollama will use CPU (slower but works)
-```
-
-### Issue: PostgreSQL connection refused
-
-**Solution:**
-```bash
-# Check if container is running
-docker-compose ps postgres
-
-# Restart container
-docker-compose restart postgres
-
-# Check logs
-docker-compose logs postgres
-
-# Verify connection
-docker exec -it postharvest-postgres psql -U scraper -d postharvest_scraper -c "SELECT 1;"
-```
-
-### Issue: MinIO bucket not created
-
-**Solution:**
-```bash
-# Create bucket manually via UI (http://localhost:9001)
-# Or via Python:
-poetry run python -c "
-from src.storage.minio_client import MinIOClient
-client = MinIOClient()
-client.ensure_bucket()
-print('Bucket created')
-"
-```
-
-### Issue: Slow LLM inference
-
-**Solutions:**
-1. **Use OpenAI** (recommended): Fast API-based inference, no local resources
-2. **Switch to faster OpenAI model**: `gpt-4o-mini` is optimized for speed
-3. **If using Ollama**:
-   - Use smaller model: Change to `llama3.1:7b` or `llama3.1:8b-q4` (quantized)
-   - Use GPU: Add GPU support to docker-compose.yml
-   - Increase timeout: Adjust `OLLAMA_MAX_TOKENS` in `.env`
-4. **Batch processing**: Already implemented for efficiency
-
-### Issue: Out of disk space
-
-**Solutions:**
-```bash
-# Check disk usage
-docker system df
-
-# Clean up old images/volumes
-docker system prune -a --volumes
-
-# Archive old documents (move from MinIO to cheaper storage)
-# Implement in your backup strategy
-```
+- Switch to quantised model: `OLLAMA_MODEL=llama3.1:8b-q4_0`
+- Enable GPU in `docker-compose.yml` (uncomment `deploy.resources.reservations.devices`)
+- Switch to OpenAI `gpt-4o-mini` for production – significantly faster
 
 ---
 
-## Performance Tuning
+## Performance settings
 
-### For Production (with OpenAI - Recommended)
+### Production (OpenAI)
 
-```bash
-# .env settings
-LLM_PROVIDER=openai
-OPENAI_MODEL=gpt-4o-mini  # Fast & cost-effective
-EMBEDDING_PROVIDER=openai
-EMBEDDING_MODEL=text-embedding-3-small
-
-CRAWL_DELAY_SECONDS=1.0
-CRAWL_MAX_DEPTH=4
-EMBEDDING_BATCH_SIZE=64
-```
-
-### For Development (Laptop/Desktop with OpenAI)
-
-```bash
-# .env settings
+```env
 LLM_PROVIDER=openai
 OPENAI_MODEL=gpt-4o-mini
 EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+CRAWL_DELAY_SECONDS=1.0
+EMBEDDING_BATCH_SIZE=64
+```
 
+### Development / laptop
+
+```env
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-4o-mini
 CRAWL_DELAY_SECONDS=3.0
 CRAWL_MAX_DEPTH=2
 EMBEDDING_BATCH_SIZE=16
 ```
 
-### For Local Development (Ollama - No API costs)
+### Fully local (Ollama, no API costs)
 
-```bash
-# .env settings
+```env
 LLM_PROVIDER=ollama
 OLLAMA_MODEL=llama3.1:8b
 EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL_LOCAL=all-MiniLM-L6-v2
-
 CRAWL_DELAY_SECONDS=3.0
 CRAWL_MAX_DEPTH=2
-EMBEDDING_BATCH_SIZE=16
-
-# Uncomment Ollama services in docker-compose.yml
-# docker-compose up -d ollama
-```
-
-### Scaling Prefect Workers
-
-```bash
-# Start multiple workers for parallel processing
-poetry run prefect agent start -q default &
-poetry run prefect agent start -q default &
-poetry run prefect agent start -q default &
-
-# Or use Dask for distributed processing
-poetry install --extras distributed
-# Update flows to use DaskTaskRunner
 ```
 
 ---
 
-## Next Steps
-
-1. **Run Initial Discovery**
-   - Test on one site first (NARO)
-   - Verify data quality in dashboard
-   - Adjust relevance threshold if needed
-
-2. **Enable All Sites**
-   - Run discovery for all 4 sites
-   - Monitor crawl progress in Prefect UI
-   - Check for errors and adjust configs
-
-3. **Setup Processing Pipeline**
-   - Run content extraction on discovered docs
-   - Generate embeddings
-   - Populate vector database
-
-4. **Configure Scheduling**
-   - Set up daily full crawls
-   - Hourly incremental checks for new content
-   - Weekly quality checks and reprocessing
-
-5. **Integrate with Your Application**
-   - Use vector DB for semantic search
-   - Build RAG application
-   - Create API endpoints
-
-6. **Production Deployment**
-   - Move to production server
-   - Setup monitoring and alerting
-   - Implement backup strategy
-   - Add authentication to dashboards
-
----
-
-## Useful Commands Cheat Sheet
+## Cheat sheet
 
 ```bash
-# Start everything
-docker-compose up -d && poetry run streamlit run dashboard/app.py
+# Setup from scratch
+make setup
 
-# Stop everything
-docker-compose down
+# Run tests
+make test
 
-# Reset database (careful!)
-docker-compose down -v
-docker-compose up -d postgres
-poetry run python scripts/init_db.py
+# Full pipeline
+poetry run python -c "from src.flows.orchestration import main_scraper_flow; main_scraper_flow()"
 
-# View Prefect flows
+# Deploy to Prefect
+poetry run python scripts/deploy_flows.py
+
+# Start scheduled worker
+poetry run prefect worker start --pool postharvest-pool
+
+# View deployments
 poetry run prefect deployment ls
 
-# Manual crawl
-poetry run python -c "from src.flows.discovery import discover_content; discover_content('naro')"
-
-# Check logs
-docker-compose logs -f | grep ERROR
-
-# Database backup
-docker exec postharvest-postgres pg_dump -U scraper postharvest_scraper > backup.sql
-
-# Database restore
-docker exec -i postharvest-postgres psql -U scraper postharvest_scraper < backup.sql
+# Reset database
+docker compose down -v
+docker compose up -d postgres
+poetry run python scripts/init_db.py
 ```
 
 ---
-
-## Getting Help
-
-- **Check logs**: `docker-compose logs -f`
-- **Verify services**: `docker-compose ps`
-- **Database queries**: Connect via `psql` and inspect tables
-- **Test LLM**: Use `curl` to test Ollama API
-- **Dashboard errors**: Check Streamlit terminal output
-
----
-
-## What's Next?
-
-Once you have data flowing, consider:
-
-1. **Building a RAG application** with LangChain
-2. **Creating an API** with FastAPI for your knowledge base
-3. **Adding more data sources** (social media, forums, YouTube)
-4. **Fine-tuning embeddings** for better search
-5. **Implementing feedback loops** to improve classification
 
 Enjoy building your post-harvest knowledge base! 🌾

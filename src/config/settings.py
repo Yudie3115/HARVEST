@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     
     # Crawling
     crawl_user_agent: str = Field(
-        default="PostHarvestBot/1.0 (+https://fourlanes.co/bot)"
+        default="PostHarvestBot/1.0 (+https://fourlanes.tech/bot)"
     )
     crawl_delay_seconds: float = Field(default=2.0)
     crawl_max_depth: int = Field(default=4)

@@ -2,7 +2,7 @@
 name = "postharvest-scraper"
 version = "0.1.0"
 description = "AI-powered web scraper for post-harvest agricultural knowledge base"
-authors = ["Fourlanes <edwin@fourlanes.co>"]
+authors = ["Fourlanes <edwin@fourlanes.tech>"]
 readme = "README.md"
 packages = [{include = "src"}]
 
