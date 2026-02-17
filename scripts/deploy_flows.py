@@ -5,25 +5,33 @@ Usage:
     poetry run python scripts/deploy_flows.py [--work-pool <pool>] [--env <env>]
 
 What this script does:
-  1. Creates a Prefect work pool (if it doesn't already exist)
-  2. Deploys all flows with their default schedules:
+  1. Points Prefect at the server configured in PREFECT_API_URL (.env / settings)
+  2. Creates a Prefect work pool (if it does not already exist)
+  3. Deploys all flows with their default schedules:
        - main_scraper_flow       → daily at 02:00 UTC
        - incremental_update_flow → hourly
        - reprocess_failed_flow   → weekly (Sunday 03:00 UTC)
 
-Requires a running Prefect server (docker compose up -d prefect_server).
+Requires a running Prefect server (docker compose up -d).
 """
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
-# Make sure the project root is on the path
+# Ensure project root is on the path BEFORE any project imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from loguru import logger  # noqa: E402
+# Load settings (reads .env) and immediately propagate PREFECT_API_URL into
+# os.environ so that the Prefect client picks it up.
+from src.config.settings import settings  # noqa: E402
 
+os.environ.setdefault("PREFECT_API_URL", settings.prefect_api_url)
+
+# Prefect imports must come AFTER os.environ is patched
+from loguru import logger  # noqa: E402
 
 WORK_POOL_DEFAULT = "postharvest-pool"
 
@@ -43,44 +51,39 @@ def parse_args() -> argparse.Namespace:
         choices=["development", "staging", "production"],
         help="Deployment environment tag (default: production)",
     )
-    parser.add_argument(
-        "--recreate",
-        action="store_true",
-        help="Delete and recreate existing deployments",
-    )
     return parser.parse_args()
 
 
 def ensure_work_pool(pool_name: str) -> None:
-    """Create the Prefect work pool if it doesn't exist."""
+    """Create the Prefect work pool if it does not already exist."""
+    from prefect.client.orchestration import get_client
+    from prefect.client.schemas.actions import WorkPoolCreate
+
+    async def _create() -> None:
+        async with get_client() as client:
+            try:
+                await client.read_work_pool(pool_name)
+                logger.info(f"Work pool already exists: {pool_name}")
+            except Exception:
+                await client.create_work_pool(
+                    WorkPoolCreate(name=pool_name, type="process")
+                )
+                logger.info(f"Created work pool: {pool_name}")
+
     try:
-        from prefect.client.orchestration import get_client
-        import httpx
-
-        async def _create():
-            async with get_client() as client:
-                try:
-                    await client.read_work_pool(pool_name)
-                    logger.info(f"Work pool already exists: {pool_name}")
-                except Exception:
-                    await client.create_work_pool(
-                        work_pool={"name": pool_name, "type": "process"}
-                    )
-                    logger.info(f"Created work pool: {pool_name}")
-
         asyncio.run(_create())
-    except Exception as e:
-        logger.warning(f"Could not ensure work pool '{pool_name}': {e}")
-        logger.warning("Continuing – you may need to create the pool manually in the Prefect UI.")
+    except Exception as exc:
+        logger.warning(
+            f"Could not ensure work pool '{pool_name}': {exc}\n"
+            "Continuing – create the pool manually in the Prefect UI if needed."
+        )
 
 
 def deploy_flows(work_pool: str, env: str) -> None:
     """Build and apply all flow deployments."""
-    from prefect import deploy
     from prefect.deployments import Deployment
     from prefect.server.schemas.schedules import CronSchedule
 
-    # Import flows
     from src.flows.orchestration import (
         main_scraper_flow,
         incremental_update_flow,
@@ -93,7 +96,9 @@ def deploy_flows(work_pool: str, env: str) -> None:
             "name": f"daily-scraper-{env}",
             "schedule": CronSchedule(cron="0 2 * * *", timezone="UTC"),
             "tags": [env, "scheduled", "daily"],
-            "description": "Full discovery + processing pipeline – runs daily at 02:00 UTC",
+            "description": (
+                "Full discovery + processing pipeline – runs daily at 02:00 UTC"
+            ),
             "parameters": {
                 "run_discovery": True,
                 "run_processing": True,
@@ -113,13 +118,16 @@ def deploy_flows(work_pool: str, env: str) -> None:
             "name": f"reprocess-failed-{env}",
             "schedule": CronSchedule(cron="0 3 * * 0", timezone="UTC"),
             "tags": [env, "scheduled", "weekly", "maintenance"],
-            "description": "Retry failed documents – runs every Sunday at 03:00 UTC",
+            "description": (
+                "Retry failed documents – runs every Sunday at 03:00 UTC"
+            ),
             "parameters": {"limit": 100},
         },
     ]
 
     for cfg in deployments:
         flow_obj = cfg.pop("flow")
+        name = cfg["name"]
         try:
             deployment = Deployment.build_from_flow(
                 flow=flow_obj,
@@ -128,39 +136,45 @@ def deploy_flows(work_pool: str, env: str) -> None:
             )
             deployment_id = deployment.apply()
             logger.info(
-                f"Deployed '{cfg['name']}' "
+                f"Deployed '{name}' "
                 f"(id={deployment_id}, schedule={cfg['schedule'].cron})"
             )
-        except Exception as e:
-            logger.error(f"Failed to deploy '{cfg['name']}': {e}")
+        except Exception as exc:
+            logger.error(f"Failed to deploy '{name}': {exc}")
 
 
 def print_summary(work_pool: str, env: str) -> None:
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("  Deployment complete!")
-    logger.info(f"  Work pool : {work_pool}")
-    logger.info(f"  Environment: {env}")
-    logger.info("")
-    logger.info("  Scheduled deployments:")
-    logger.info(f"    daily-scraper-{env}       → daily  02:00 UTC")
-    logger.info(f"    incremental-update-{env}  → hourly")
-    logger.info(f"    reprocess-failed-{env}    → weekly 03:00 UTC (Sunday)")
-    logger.info("")
-    logger.info("  Start a worker to execute flows:")
-    logger.info(f"    prefect worker start --pool {work_pool}")
-    logger.info("")
-    logger.info("  Or trigger manually:")
-    logger.info(f"    prefect deployment run 'post_harvest_scraper/daily-scraper-{env}'")
-    logger.info("=" * 60)
+    lines = [
+        "",
+        "=" * 60,
+        "  Deployment complete!",
+        f"  Work pool  : {work_pool}",
+        f"  Environment: {env}",
+        "",
+        "  Scheduled deployments:",
+        f"    daily-scraper-{env:<12} → daily  02:00 UTC",
+        f"    incremental-update-{env:<7} → hourly",
+        f"    reprocess-failed-{env:<9} → weekly 03:00 UTC (Sunday)",
+        "",
+        "  Start a worker to execute flows:",
+        f"    prefect worker start --pool {work_pool}",
+        "",
+        "  Or trigger manually:",
+        (
+            f"    prefect deployment run "
+            f"'post_harvest_scraper/daily-scraper-{env}'"
+        ),
+        "=" * 60,
+    ]
+    for line in lines:
+        logger.info(line)
 
 
 def main() -> None:
     args = parse_args()
-
     logger.info(
         f"Deploying flows to Prefect "
-        f"(pool={args.work_pool}, env={args.env})"
+        f"(url={settings.prefect_api_url}, pool={args.work_pool}, env={args.env})"
     )
 
     ensure_work_pool(args.work_pool)

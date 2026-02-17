@@ -17,7 +17,6 @@ Exit code 0 = all tests passed, non-zero = one or more failures.
 
 import argparse
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -325,14 +324,14 @@ def main():
     if args.skip_crawl:
         print(f"  {SKIP}  Discovery crawl (--skip-crawl)")
         _results.append(("Discovery crawl", True, "skipped"))
-        discovery_ok = False
     else:
         print("         (crawling naro.go.ug – may take 30–90 s)")
         disc = check("Crawl + LLM classify + DB store", check_discovery_crawl)
-        discovery_ok = disc is not None
         if disc:
-            print(f"         → {disc['urls_discovered']} URLs, "
-                  f"{disc['documents_stored']} stored")
+            print(
+                f"         → {disc['urls_discovered']} URLs, "
+                f"{disc['documents_stored']} stored"
+            )
 
     # ── 6. Processing pipeline ───────────────────────────────────
     section("6 / 6  Processing Pipeline (download → extract → embed → store)")
@@ -355,14 +354,16 @@ def main():
     # ── Summary ──────────────────────────────────────────────────
     print(f"\n{'=' * 60}")
     passed = sum(1 for _, ok, _ in _results if ok)
-    total  = len(_results)
-    skipped = sum(1 for _, ok, d in _results if d == "skipped")
+    total = len(_results)
+    skipped = sum(1 for _, _ok, d in _results if d == "skipped")
     failed = total - passed
 
-    print(f"  Results: {passed}/{total} passed  "
-          f"({skipped} skipped, {failed} failed)")
+    print(
+        f"  Results: {passed}/{total} passed  "
+        f"({skipped} skipped, {failed} failed)"
+    )
 
-    failures = [(l, d) for l, ok, d in _results if not ok]
+    failures = [(label, d) for label, ok, d in _results if not ok]
     if failures:
         print(f"\n  {RED}Failures:{RESET}")
         for label, detail in failures:
