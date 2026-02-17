@@ -376,6 +376,25 @@ Summary:"""
             "technical_level": "unknown",
         }
     
+    def answer_question(
+        self,
+        question: str,
+        chunks: List[Dict],
+        max_tokens: int = 1024,
+    ) -> str:
+        """
+        RAG answer synthesis. chunks contain 'text' and 'source_url'.
+        Returns the LLM's answer string (may include [1]-style citations).
+        """
+        from src.llm.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
+        prompt = build_qa_prompt(question, chunks)
+        return self._generate(
+            prompt=prompt,
+            system_prompt=QA_SYSTEM_PROMPT,
+            response_format="",
+            max_tokens=max_tokens,
+        )
+
     def check_connection(self) -> bool:
         """Check if LLM service is accessible"""
         try:

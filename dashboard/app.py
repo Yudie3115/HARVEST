@@ -128,6 +128,22 @@ def _semantic_search(query: str, top_k: int = 10) -> List[Dict]:
         return []
 
 
+def _answer_question(
+    question: str, top_k: int, score_threshold: float
+) -> tuple:
+    """Retrieve relevant chunks and synthesise a grounded answer."""
+    results = _semantic_search(question, top_k)
+    results = [r for r in results if r.get("score", 0) >= score_threshold]
+    if not results:
+        return None, []
+    chunk_payloads = [r["payload"] for r in results]
+    llm = _get_llm()
+    if llm is None:
+        return None, results
+    answer = llm.answer_question(question, chunk_payloads)
+    return answer, results
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -171,8 +187,8 @@ with st.sidebar:
 st.title("📊 Post-Harvest Knowledge Scraper")
 st.caption("Real-time monitoring and management dashboard")
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📊 Overview", "📄 Documents", "🔍 Search", "⚙️ Configuration"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["📊 Overview", "📄 Documents", "🔍 Search", "🤖 Knowledge Base Q&A", "⚙️ Configuration"]
 )
 
 # ---------------------------------------------------------------------------
@@ -315,10 +331,84 @@ with tab3:
 
 
 # ---------------------------------------------------------------------------
-# Tab 4: Configuration
+# Tab 4: Knowledge Base Q&A
 # ---------------------------------------------------------------------------
 
 with tab4:
+    st.subheader("🤖 Knowledge Base Q&A")
+    st.caption("Ask a question — the AI will search the knowledge base and synthesise a grounded answer.")
+
+    question = st.text_area(
+        "Ask a question about post-harvest practices:",
+        placeholder="e.g. What are best practices for maize storage after harvest?",
+        height=100,
+    )
+
+    with st.expander("Search Filters"):
+        qa_top_k = st.slider(
+            "Top-K chunks to retrieve",
+            min_value=3,
+            max_value=15,
+            value=8,
+            help="Number of document chunks passed to the LLM",
+        )
+        qa_threshold = st.slider(
+            "Minimum similarity score",
+            min_value=0.0,
+            max_value=0.9,
+            value=0.4,
+            step=0.05,
+            help="Chunks below this score are excluded",
+        )
+
+    ask_clicked = st.button("Ask the Knowledge Base", type="primary")
+
+    if ask_clicked and question.strip():
+        with st.spinner("Searching knowledge base and generating answer…"):
+            answer, results = _answer_question(question.strip(), qa_top_k, qa_threshold)
+
+        if answer is None and not results:
+            st.warning(
+                "No relevant chunks found above the similarity threshold. "
+                "Try lowering the minimum similarity score or rephrasing your question."
+            )
+        elif answer is None:
+            st.error("LLM service is unavailable. Check your configuration in the ⚙️ tab.")
+        else:
+            st.divider()
+            st.markdown("**Answer:**")
+            st.info(answer)
+
+            st.divider()
+            st.markdown(f"**Sources** ({len(results)} chunks retrieved):")
+
+            for i, res in enumerate(results, 1):
+                payload = res.get("payload", {})
+                score = res.get("score", 0)
+                url = payload.get("source_url", "Unknown source")
+                topics = ", ".join(payload.get("topics", []) or ["-"])
+                crops = ", ".join(payload.get("crops", []) or ["-"])
+                label = f"[{i}] {url}"
+                with st.expander(label):
+                    st.progress(float(score), text=f"Similarity: {score:.3f}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.caption(f"Topics: {topics}")
+                        st.caption(f"Crops: {crops}")
+                    with col2:
+                        st.caption(f"Type: {payload.get('document_type', 'N/A')}")
+                        st.caption(f"Relevance score: {payload.get('relevance_score', 'N/A')}")
+                    st.markdown(f"[Open source]({url})")
+                    st.write(payload.get("text", ""))
+    elif ask_clicked:
+        st.warning("Please enter a question before clicking Ask.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 5: Configuration
+# ---------------------------------------------------------------------------
+
+with tab5:
     st.subheader("⚙️ System Configuration")
 
     col1, col2 = st.columns(2)

@@ -127,3 +127,34 @@ Summary:"""
 
 def build_summarisation_prompt(text: str, max_length: int = 200) -> str:
     return SUMMARISATION_TEMPLATE.format(text=text[:2000], max_length=max_length)
+
+
+# ---------------------------------------------------------------------------
+# RAG Q&A
+# ---------------------------------------------------------------------------
+
+QA_SYSTEM_PROMPT = """You are an agricultural knowledge assistant specialising in post-harvest practices in Uganda and East Africa. Answer questions using only the provided document excerpts. Always cite your sources by referring to the source number (e.g. [1], [2]). If the excerpts do not contain enough information to answer the question, say so clearly — do not fabricate information."""
+
+QA_ANSWER_TEMPLATE = """Use the following document excerpts to answer the question. Each excerpt is preceded by its source number.
+
+{context}
+
+Question: {question}
+
+Provide a clear, structured answer. Cite source numbers inline (e.g. [1]). If the answer spans multiple sources, cite each one where it is relevant."""
+
+
+def build_qa_prompt(question: str, chunks: list) -> str:
+    """
+    Build a RAG prompt from a question and retrieved chunks.
+
+    chunks: list of dicts with keys 'text', 'source_url', 'score'
+    Numbers sources [1], [2], ... for citation.
+    """
+    context_parts = []
+    for i, chunk in enumerate(chunks, 1):
+        context_parts.append(
+            f"[{i}] Source: {chunk.get('source_url', 'Unknown')}\n{chunk['text']}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+    return QA_ANSWER_TEMPLATE.format(context=context, question=question)
