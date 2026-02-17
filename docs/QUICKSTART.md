@@ -23,14 +23,10 @@ Optional:
 mkdir postharvest-scraper
 cd postharvest-scraper
 
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
 # Install Poetry (if not already installed)
-pip install poetry
+curl -sSL https://install.python-poetry.org | python3 -
 
-# Install dependencies
+# Install dependencies (Poetry creates and manages the virtualenv automatically)
 poetry install
 ```
 
@@ -126,9 +122,6 @@ docker exec postharvest-ollama ollama pull llama3.1:8b
 ### Test 1: Single Site Discovery
 
 ```bash
-# Activate virtual environment
-source venv/bin/activate
-
 # Run discovery for NARO site
 poetry run python -c "
 from src.flows.discovery import discover_content
@@ -356,6 +349,14 @@ tail -f logs/scraper.log
 ---
 
 ## Troubleshooting
+
+### Issue: `python: No such file or directory`
+
+Ubuntu/Debian don't install a bare `python` command by default — only `python3`. Always use `poetry run python ...` instead of activating the venv manually. If you need a shell with `python` available:
+
+```bash
+poetry shell
+```
 
 ### Issue: LLM connection errors
 

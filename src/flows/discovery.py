@@ -12,6 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import hashlib
+import time
 
 from src.config.settings import settings
 from src.config.site_configs import get_site_config, SiteConfig
@@ -69,6 +70,7 @@ def crawl_site(site_name: str, max_urls: int = 1000) -> List[str]:
                 response = client.get(url)
                 response.raise_for_status()
                 visited.add(url)
+                time.sleep(config.rate_limit)
                 
                 # Parse HTML and extract links
                 soup = BeautifulSoup(response.text, 'html.parser')

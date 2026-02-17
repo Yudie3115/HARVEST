@@ -108,8 +108,8 @@ class Document(Base):
     content_preview = Column(Text)  # First 500 chars
     
     # Metadata
-    metadata = Column(JSONB)
-    
+    extra_metadata = Column("metadata", JSONB)
+
     # Error tracking
     error_log = Column(Text)
     retry_count = Column(Integer, default=0)
@@ -192,8 +192,8 @@ class ContentChunk(Base):
     vector_id = Column(String(100))  # Qdrant point ID
     
     # Chunk metadata
-    metadata = Column(JSONB)
-    
+    extra_metadata = Column("metadata", JSONB)
+
     # Timestamps
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     
@@ -251,8 +251,8 @@ class SystemMetric(Base):
     component = Column(String(100))  # crawler, processor, llm, etc.
     
     # Additional data
-    metadata = Column(JSONB)
-    
+    extra_metadata = Column("metadata", JSONB)
+
     # Timestamp
     recorded_at = Column(
         DateTime, 

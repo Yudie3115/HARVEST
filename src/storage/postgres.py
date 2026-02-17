@@ -115,7 +115,7 @@ class PostgresClient:
                 document_type=document_type,
                 file_hash=file_hash,
                 status=DocumentStatus.DISCOVERED,
-                metadata=metadata or {}
+                extra_metadata=metadata or {}
             )
             session.add(document)
             session.commit()

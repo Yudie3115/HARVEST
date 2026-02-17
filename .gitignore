@@ -1,5 +1,6 @@
 venv/
 .env
+.venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -13,3 +14,5 @@ __pycache__/
 .idea/
 .vscode/
 *.egg-info/
+
+data/

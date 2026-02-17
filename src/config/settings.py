@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: PostgresDsn = Field(
-        default="postgresql://scraper:changeme123@localhost:5432/postharvest_scraper"
+        default="postgresql://scraper:ph_scraper_pass@localhost:5432/postharvest_scraper"
     )
     database_pool_size: int = Field(default=20)
     database_max_overflow: int = Field(default=0)
@@ -42,13 +42,13 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o-mini")
     openai_temperature: float = Field(default=0.1)
-    openai_max_tokens: int = Field(default=2048)
+    openai_max_tokens: int = Field(default=8192)
     
     # Ollama (fallback)
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="llama3.1:8b")
     ollama_temperature: float = Field(default=0.1)
-    ollama_max_tokens: int = Field(default=2048)
+    ollama_max_tokens: int = Field(default=8192)
     
     # Embeddings
     embedding_provider: Literal["openai", "local"] = Field(default="openai")

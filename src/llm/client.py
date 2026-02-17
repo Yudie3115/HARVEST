@@ -112,34 +112,30 @@ class LLMClient:
         Returns:
             List of classification results
         """
-        # Process in batches of 50
+        # Process in batches of 20 to keep responses well within token limits
+        BATCH_SIZE = 20
         all_results = []
-        
-        for i in range(0, len(urls), 50):
-            batch = urls[i:i+50]
-            
+
+        for i in range(0, len(urls), BATCH_SIZE):
+            batch = urls[i:i + BATCH_SIZE]
+
             system_prompt = "You are a content classifier for an agricultural knowledge base focused on post-harvest practices in Uganda."
-            
+
             prompt = f"""Analyze these URLs and determine their relevance to post-harvest topics such as storage, drying, pest management, contamination, quality control, handling, and marketing.
 
 URLs:
 {chr(10).join(f"{idx}. {url}" for idx, url in enumerate(batch, 1))}
 
-For each URL, return:
+For each URL return a JSON object with these fields (be concise):
 - url: The original URL
-- relevance_score: Score from 0-10 (10 = highly relevant to post-harvest)
-- topics: List of applicable topics from {POST_HARVEST_TOPICS}
-- document_type: Likely type from {DOCUMENT_TYPES}
-- priority: Processing priority (high/medium/low)
-- reason: Brief explanation of the relevance score
+- relevance_score: 0-10 (10 = highly relevant)
+- topics: list from {POST_HARVEST_TOPICS}
+- document_type: one value from {DOCUMENT_TYPES}
+- priority: high/medium/low
 
-Relevant indicators:
-- Keywords: post-harvest, storage, drying, pest, loss, handling, preservation, quality, contamination, aflatoxin
-- File types: PDF, DOC, video content
-- Government extension sites, research publications, ATAAS reports
-- Agricultural surveys, policy documents, training materials
+Relevant indicators: post-harvest, storage, drying, pest, loss, handling, preservation, quality, contamination, aflatoxin, PDF/DOC files, research publications, extension guides.
 
-Return as JSON array with one object per URL under a "urls" key.
+Return as JSON with a single "urls" key containing the array.
 """
             
             try:
@@ -254,7 +250,13 @@ Return as a single JSON object with all fields.
             )
             classification = json.loads(response)
             
-            # Validate and normalize
+            # Normalize field names: LLM may return primary_topics/crops_mentioned
+            if "primary_topics" in classification and "topics" not in classification:
+                classification["topics"] = classification.pop("primary_topics")
+            if "crops_mentioned" in classification and "crops" not in classification:
+                classification["crops"] = classification.pop("crops_mentioned")
+
+            # Validate and set defaults
             classification.setdefault("relevance_score", 5.0)
             classification.setdefault("topics", [])
             classification.setdefault("crops", [])
@@ -361,8 +363,8 @@ Summary:"""
         """Return default classification when LLM fails"""
         return {
             "relevance_score": 5.0,
-            "primary_topics": [],
-            "crops_mentioned": [],
+            "topics": [],
+            "crops": [],
             "regions": [],
             "document_type": "unknown",
             "target_audience": [],
