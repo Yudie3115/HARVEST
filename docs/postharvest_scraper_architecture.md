@@ -29,11 +29,11 @@ A production-grade web scraping and content processing system designed to build 
 └───────┬──────┘ └─────┬──────────┘
         │               │
         │               │
-┌───────▼───────────────▼──────────────────────────────────────┐
+┌───────▼───────────────▼───────────────────────────────────────┐
 │                   Storage Layer                               │
-│  • PostgreSQL (metadata, crawl state)                        │
-│  • MinIO/S3 (raw documents, PDFs)                           │
-│  • Qdrant/Chroma (vector embeddings)                        │
+│  • PostgreSQL (metadata, crawl state)                         │
+│  • MinIO/S3 (raw documents, PDFs)                             │
+│  • Qdrant/Chroma (vector embeddings)                          │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -1131,3 +1131,5 @@ volumes:
 4. **Completeness:** % of discovered docs successfully processed
 5. **Search quality:** User feedback on search results
 
+# Next Steps
+- Look into translation. See how Hugging Face can assist with that.
