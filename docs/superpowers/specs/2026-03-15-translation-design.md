@@ -126,30 +126,41 @@ SUPPORTED_LANGUAGES = {
 ```python
 class TranslationClient:
     def detect_language(self, text: str) -> str | None
-        # Returns a language code or None if undetected/low confidence
+        # Returns a language code or None if confidence < settings.translation_min_confidence
+        # or if the language is not in SUPPORTED_LANGUAGES.
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> str
-        # Returns original text unchanged if source == target
-        # Raises TranslationError on permanent failure
-        # Chunks input exceeding 512 tokens automatically
+        # Returns original text unchanged if source == target.
+        # Raises TranslationError on permanent failure.
+        # Raises TranslationError if len(text) > 10,000 characters.
+        # For inputs over ~500 characters, splits on paragraph/sentence
+        # boundaries, translates each chunk, and joins with a single space.
 
     def translate_to_english(self, text: str, source_lang: str) -> str
     def translate_from_english(self, text: str, target_lang: str) -> str
 ```
 
 - Reads `settings.sunbird_api_key` and `settings.sunbird_api_url`
+- If `sunbird_api_key` is empty, `detect_language` returns `None` and `translate` raises `TranslationError` immediately without making any network calls. This prevents noisy log warnings for deployments that have not configured the feature.
 - Retries up to 3 times with exponential backoff on transient errors (429, 503, 504)
 - Raises `TranslationError` (a typed exception) on permanent failure
 
+**Text chunking:** Split on `\n\n` (paragraph) boundaries first, then sentence boundaries (`". "`) if a paragraph exceeds 500 characters. No tiktoken dependency — character count is sufficient. Join translated paragraph chunks with `"\n\n"` (preserving document structure); join sentence-split sub-chunks with `" "`. Hard limit: refuse inputs over 10,000 characters with `TranslationError("Input too long")`.
+
+**HTTP timeouts:** All Sunbird requests use `httpx.Timeout(connect=5.0, read=15.0)`. Timeout exceptions are treated as transient errors and follow the same retry/degradation path as 503/504.
+
+**Language detection threshold:** `detect_language` returns `None` when the Sunbird response confidence is below `settings.translation_min_confidence` (default `0.80`). Short or ambiguous inputs (single words, proper nouns) commonly fall below this threshold and will correctly fall through to English.
+
 ### Modified: `src/config/settings.py`
 
-Three new fields added to the `Settings` class:
+Four new fields added to the `Settings` class:
 
 ```python
 # Translation (Sunbird AI)
 sunbird_api_key: str = Field(default="")
 sunbird_api_url: str = Field(default="https://api.sunbird.ai")
 translation_enabled: bool = Field(default=True)
+translation_min_confidence: float = Field(default=0.80)
 ```
 
 ### Modified: `dashboard/app.py`
@@ -171,14 +182,21 @@ Steps added:
 4. If local language detected: translate answer → local language
 5. Return `(translated_answer, results, detected_lang)`
 
+**Early-return statements inside `_answer_question()`** must all be updated from 2-tuples to 3-tuples:
+- `return None, []` → `return None, [], None`
+- `return None, results` → `return None, results, None`
+
 **Q&A tab display** — additions:
 - Badge above answer: `st.caption("Detected: Luganda — answering in Luganda")`
 - Answer rendered as today (inside `st.info`)
 - Sources remain in English
 
+**`_answer_question()` call site** — line 368 unpacking changes from `answer, results = _answer_question(...)` to `answer, results, detected_lang = _answer_question(...)`.
+
 **`_semantic_search()`** — no signature change; query translation handled in the Search tab block before calling this function.
 
 **Search tab** — addition:
+- Only attempt language detection and query translation if `settings.translation_enabled` is `True`
 - Detect language and translate query to English before calling `_semantic_search()`
 - Show `st.caption("Searching in English (translated from Luganda)")` when translation occurs
 
@@ -193,6 +211,7 @@ Steps added:
 sunbird_api_key: str = Field(default="")
 sunbird_api_url: str = Field(default="https://api.sunbird.ai")
 translation_enabled: bool = Field(default=True)
+translation_min_confidence: float = Field(default=0.80)
 ```
 
 ### `.env.example` additions
@@ -206,6 +225,9 @@ translation_enabled: bool = Field(default=True)
 SUNBIRD_API_KEY=your_sunbird_api_key_here
 SUNBIRD_API_URL=https://api.sunbird.ai
 TRANSLATION_ENABLED=true
+# Minimum confidence score (0–1) for language detection to trigger translation.
+# Inputs below this threshold are treated as English.
+TRANSLATION_MIN_CONFIDENCE=0.80
 ```
 
 ---
@@ -230,9 +252,12 @@ All `TranslationError` exceptions are caught at the dashboard layer and never su
 |---|---|
 | `src/translation/__init__.py` | New |
 | `src/translation/client.py` | New |
-| `src/config/settings.py` | Add 3 fields |
-| `.env.example` | Add translation section |
-| `dashboard/app.py` | Wrap Q&A and Search with translation layer |
+| `src/config/settings.py` | Add 4 fields |
+| `.env.example` | Add translation section (4 vars) |
+| `dashboard/app.py` | Wrap Q&A and Search with translation layer; update `_answer_question` return type; update call-site unpacking at line 368 |
+| `tests/test_translation_client.py` | New — unit tests with mocked HTTP for detect, translate, retry, degradation |
+
+No new packages required. `httpx` (already a dependency) is used for Sunbird API calls.
 
 ---
 
