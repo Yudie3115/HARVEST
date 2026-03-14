@@ -92,7 +92,13 @@ class Settings(BaseSettings):
     # Streamlit
     streamlit_server_port: int = Field(default=8501)
     streamlit_server_address: str = Field(default="0.0.0.0")
-    
+
+    # Translation (Sunbird AI)
+    sunbird_api_key: str = Field(default="")
+    sunbird_api_url: str = Field(default="https://api.sunbird.ai")
+    translation_enabled: bool = Field(default=True)
+    translation_min_confidence: float = Field(default=0.80)
+
     # Development
     debug: bool = Field(default=False)
     environment: Literal["development", "staging", "production"] = Field(
