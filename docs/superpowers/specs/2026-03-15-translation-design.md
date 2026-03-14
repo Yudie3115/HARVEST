@@ -130,14 +130,18 @@ class TranslationClient:
         # or if the language is not in SUPPORTED_LANGUAGES.
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> str
-        # Returns original text unchanged if source == target.
-        # Raises TranslationError on permanent failure.
-        # Raises TranslationError if len(text) > 10,000 characters.
-        # For inputs over ~500 characters, splits on paragraph/sentence
-        # boundaries, translates each chunk, and joins with a single space.
+        # Evaluation order:
+        #   1. If source_lang == target_lang: return text unchanged (no network call).
+        #   2. If len(text) > 10,000: raise TranslationError("Input too long").
+        #   3. If len(text) <= 500: send as a single request, no splitting.
+        #   4. Otherwise: split on paragraph/sentence boundaries, translate each chunk,
+        #      rejoin (see "Text chunking" below).
+        # Raises TranslationError on permanent API failure.
 
     def translate_to_english(self, text: str, source_lang: str) -> str
     def translate_from_english(self, text: str, target_lang: str) -> str
+        # Both are thin wrappers around translate().
+        # TranslationError is propagated to the caller — not swallowed.
 ```
 
 - Reads `settings.sunbird_api_key` and `settings.sunbird_api_url`
