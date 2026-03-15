@@ -63,6 +63,48 @@ class TranslationClient:
         """Convenience wrapper: translate from English to target_lang."""
         return self.translate(text, "eng", target_lang)
 
+    def detect_language(self, text: str) -> str | None:
+        """Detect the language of text.
+
+        Returns a language code (e.g. "lug") if detected with confidence
+        >= self._min_confidence and the code is in SUPPORTED_LANGUAGES
+        (excluding "eng", which needs no translation).
+        Returns None on low confidence, unsupported language, English, or any
+        API failure.
+        """
+        if not self._api_key:
+            return None
+
+        url = f"{self._base_url}/tasks/language_id"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.post(url, json={"text": text}, headers=headers)
+
+            if response.status_code != 200:
+                logger.warning(f"Language detection returned {response.status_code}")
+                return None
+
+            data = response.json()
+            lang = data.get("language")
+            confidence = data.get("confidence", 0.0)
+
+            if confidence < self._min_confidence:
+                return None
+
+            from src.translation import SUPPORTED_LANGUAGES
+            if lang not in SUPPORTED_LANGUAGES or lang == "eng":
+                return None
+
+            return lang
+
+        except Exception as exc:
+            logger.warning(f"Language detection failed: {exc}")
+            return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

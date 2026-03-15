@@ -155,3 +155,83 @@ class TestTranslate:
             with pytest.raises(TranslationError):
                 client.translate("Hello", "eng", "lug")
         assert mock_http.post.call_count == 1
+
+
+class TestDetectLanguage:
+    def test_high_confidence_returns_language_code(self):
+        client = _make_client()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"language": "lug", "confidence": 0.95}
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("Oli otya")
+        assert result == "lug"
+
+    def test_low_confidence_returns_none(self):
+        """Confidence below threshold → None (treat as English)."""
+        client = _make_client(translation_min_confidence=0.80)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"language": "lug", "confidence": 0.60}
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("test")
+        assert result is None
+
+    def test_english_detection_returns_none(self):
+        """Detecting 'eng' returns None — no translation needed."""
+        client = _make_client()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"language": "eng", "confidence": 0.99}
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("How are you?")
+        assert result is None
+
+    def test_empty_api_key_returns_none_without_network(self):
+        client = _make_client(sunbird_api_key="")
+        with patch("httpx.Client") as mock_httpx:
+            result = client.detect_language("Oli otya")
+        assert result is None
+        mock_httpx.assert_not_called()
+
+    def test_api_failure_returns_none(self):
+        """Any API error during detection → None (degrade gracefully)."""
+        client = _make_client()
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.side_effect = Exception("connection refused")
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("Oli otya")
+        assert result is None
+
+    def test_unsupported_language_returns_none(self):
+        """Language code not in SUPPORTED_LANGUAGES → None."""
+        client = _make_client()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"language": "fra", "confidence": 0.97}
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("Bonjour")
+        assert result is None
