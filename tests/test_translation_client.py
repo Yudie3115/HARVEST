@@ -138,3 +138,20 @@ class TestTranslate:
         client = _make_client(sunbird_api_key="")
         with pytest.raises(TranslationError):
             client.translate_from_english("Hello", "lug")
+
+    def test_non_retryable_error_fails_fast(self):
+        """400/401 should raise TranslationError immediately without retrying."""
+        from src.translation import TranslationError
+        client = _make_client()
+        fail_response = MagicMock()
+        fail_response.status_code = 401
+        fail_response.text = "Unauthorized"
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = fail_response
+            mock_httpx_cls.return_value = mock_http
+            with pytest.raises(TranslationError):
+                client.translate("Hello", "eng", "lug")
+        assert mock_http.post.call_count == 1

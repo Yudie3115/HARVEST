@@ -81,15 +81,22 @@ class TranslationClient:
         }
 
         last_exc: Exception | None = None
+        last_status: int | None = None
         for attempt in range(_MAX_RETRIES):
             try:
                 with httpx.Client(timeout=self._timeout) as client:
                     response = client.post(url, json=payload, headers=headers)
 
                 if response.status_code == 200:
-                    return response.json()["translated_text"]
+                    data = response.json()
+                    if "translated_text" not in data:
+                        raise TranslationError(
+                            f"Sunbird API returned 200 but missing 'translated_text' key: {data}"
+                        )
+                    return data["translated_text"]
 
                 if response.status_code in _TRANSIENT_STATUS_CODES:
+                    last_status = response.status_code
                     wait = 2 ** attempt
                     logger.warning(
                         f"Sunbird translate returned {response.status_code}, "
@@ -117,6 +124,7 @@ class TranslationClient:
 
         raise TranslationError(
             f"Sunbird translate failed after {_MAX_RETRIES} attempts"
+            + (f" (last status: {last_status})" if last_status else "")
         ) from last_exc
 
     def _split_text(self, text: str) -> list[tuple[str, str]]:
@@ -129,7 +137,11 @@ class TranslationClient:
             else:
                 # Split on sentence boundaries
                 sentences = para.split(". ")
-                chunks.extend(("sent", s) for s in sentences if s.strip())
+                for j, s in enumerate(sentences):
+                    if s.strip():
+                        # Re-append period to all but the last fragment
+                        text = s if j == len(sentences) - 1 else s + "."
+                        chunks.append(("sent", text))
         return chunks
 
     def _translate_chunked(
