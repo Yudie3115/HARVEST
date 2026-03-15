@@ -44,6 +44,18 @@ def _get_llm():
         return None
 
 
+@st.cache_resource(ttl=3600)
+def _get_translator():
+    try:
+        from src.config.settings import settings
+        if not settings.translation_enabled:
+            return None
+        from src.translation import TranslationClient
+        return TranslationClient()
+    except Exception:
+        return None
+
+
 def _get_stats() -> Dict:
     db = _get_db()
     if db is None:
@@ -130,18 +142,52 @@ def _semantic_search(query: str, top_k: int = 10) -> List[Dict]:
 
 def _answer_question(
     question: str, top_k: int, score_threshold: float
-) -> tuple:
-    """Retrieve relevant chunks and synthesise a grounded answer."""
-    results = _semantic_search(question, top_k)
+) -> tuple[str | None, list, str | None]:
+    """Retrieve relevant chunks and synthesise a grounded answer.
+
+    Returns (answer, results, detected_lang).
+    detected_lang is None when the question is English or translation is disabled.
+    """
+    from src.config.settings import settings
+    from src.translation import TranslationError, SUPPORTED_LANGUAGES
+
+    detected_lang: str | None = None
+    english_question = question
+
+    # --- Translation: query → English ---
+    if settings.translation_enabled:
+        translator = _get_translator()
+        if translator is not None:
+            detected_lang = translator.detect_language(question)
+            if detected_lang is not None:
+                try:
+                    english_question = translator.translate_to_english(question, detected_lang)
+                except TranslationError as exc:
+                    st.warning(f"Could not translate your question — searching in original language. ({exc})")
+                    detected_lang = None
+
+    results = _semantic_search(english_question, top_k)
     results = [r for r in results if r.get("score", 0) >= score_threshold]
     if not results:
-        return None, []
+        return None, [], None
+
     chunk_payloads = [r["payload"] for r in results]
     llm = _get_llm()
     if llm is None:
-        return None, results
-    answer = llm.answer_question(question, chunk_payloads)
-    return answer, results
+        return None, results, None
+
+    answer = llm.answer_question(english_question, chunk_payloads)
+
+    # --- Translation: answer → local language ---
+    if detected_lang is not None and settings.translation_enabled:
+        translator = _get_translator()
+        if translator is not None:
+            try:
+                answer = translator.translate_from_english(answer, detected_lang)
+            except TranslationError:
+                answer = answer + "\n\n*(Could not translate answer — showing in English)*"
+
+    return answer, results, detected_lang
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +411,7 @@ with tab4:
 
     if ask_clicked and question.strip():
         with st.spinner("Searching knowledge base and generating answer…"):
-            answer, results = _answer_question(question.strip(), qa_top_k, qa_threshold)
+            answer, results, detected_lang = _answer_question(question.strip(), qa_top_k, qa_threshold)
 
         if answer is None and not results:
             st.warning(
@@ -376,6 +422,10 @@ with tab4:
             st.error("LLM service is unavailable. Check your configuration in the ⚙️ tab.")
         else:
             st.divider()
+            if detected_lang is not None:
+                from src.translation import SUPPORTED_LANGUAGES
+                lang_name = SUPPORTED_LANGUAGES.get(detected_lang, detected_lang)
+                st.caption(f"Detected: {lang_name} — answering in {lang_name}")
             st.markdown("**Answer:**")
             st.info(answer)
 
