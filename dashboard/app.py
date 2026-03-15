@@ -149,22 +149,22 @@ def _answer_question(
     detected_lang is None when the question is English or translation is disabled.
     """
     from src.config.settings import settings
-    from src.translation import TranslationError, SUPPORTED_LANGUAGES
+    from src.translation import TranslationError
 
     detected_lang: str | None = None
     english_question = question
 
+    translator = _get_translator() if settings.translation_enabled else None
+
     # --- Translation: query → English ---
-    if settings.translation_enabled:
-        translator = _get_translator()
-        if translator is not None:
-            detected_lang = translator.detect_language(question)
-            if detected_lang is not None:
-                try:
-                    english_question = translator.translate_to_english(question, detected_lang)
-                except TranslationError as exc:
-                    st.warning(f"Could not translate your question — searching in original language. ({exc})")
-                    detected_lang = None
+    if translator is not None:
+        detected_lang = translator.detect_language(question)
+        if detected_lang is not None:
+            try:
+                english_question = translator.translate_to_english(question, detected_lang)
+            except TranslationError as exc:
+                st.warning(f"Could not translate your question — searching in original language. ({exc})")
+                detected_lang = None
 
     results = _semantic_search(english_question, top_k)
     results = [r for r in results if r.get("score", 0) >= score_threshold]
@@ -179,13 +179,11 @@ def _answer_question(
     answer = llm.answer_question(english_question, chunk_payloads)
 
     # --- Translation: answer → local language ---
-    if detected_lang is not None and settings.translation_enabled:
-        translator = _get_translator()
-        if translator is not None:
-            try:
-                answer = translator.translate_from_english(answer, detected_lang)
-            except TranslationError:
-                answer = answer + "\n\n*(Could not translate answer — showing in English)*"
+    if detected_lang is not None and translator is not None:
+        try:
+            answer = translator.translate_from_english(answer, detected_lang)
+        except TranslationError:
+            answer = answer + "\n\n*(Could not translate answer — showing in English)*"
 
     return answer, results, detected_lang
 
