@@ -348,10 +348,10 @@ with tab3:
     if query:
         with st.spinner("Searching…"):
             from src.config.settings import settings
-            from src.translation import TranslationError
             search_query = query
             search_lang: str | None = None
             if settings.translation_enabled:
+                from src.translation import TranslationError
                 translator = _get_translator()
                 if translator is not None:
                     search_lang = translator.detect_language(query)
