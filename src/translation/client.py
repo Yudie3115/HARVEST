@@ -198,8 +198,8 @@ class TranslationClient:
                 for j, s in enumerate(sentences):
                     if s.strip():
                         # Re-append period to all but the last fragment
-                        text = s if j == len(sentences) - 1 else s + "."
-                        chunks.append(("sent", text))
+                        chunk_text = s if j == len(sentences) - 1 else s + "."
+                        chunks.append(("sent", chunk_text))
         return chunks
 
     def _translate_chunked(

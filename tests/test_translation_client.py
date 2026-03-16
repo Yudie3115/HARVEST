@@ -125,6 +125,40 @@ class TestTranslate:
         assert result == "Omurongo ogwa kubiri.\n\nOmurongo ogwa kabiri."
         assert mock_http.post.call_count == 2
 
+    def test_long_paragraph_split_on_sentences_and_rejoined(self):
+        """Single paragraph > 500 chars is split on sentences, each translated, rejoined with space."""
+        client = _make_client()
+        # One paragraph, no \n\n separators, > 500 chars to trigger chunked path
+        # > 500 total, will be split into sentences
+        sentence1 = "Maize should be stored at moisture content below fourteen percent. "
+        sentence2 = "Farmers should use hermetic bags to prevent pest infestation during storage. "
+        sentence3 = "Drying grain in direct sunlight is the most cost-effective method for smallholder farmers. "
+        # Repeat to exceed 500 chars
+        para = (sentence1 * 3 + sentence2 * 3 + sentence3 * 3).strip()
+        assert len(para) > 500  # verify test setup
+
+        # _split_text splits on ". " so we expect multiple translate calls
+        # Mock: return translated chunk for each call
+        def make_response(text):
+            r = MagicMock()
+            r.status_code = 200
+            r.json.return_value = {"translated_text": f"[translated]"}
+            return r
+
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.side_effect = [MagicMock(status_code=200, **{"json.return_value": {"translated_text": f"chunk{i}"}}) for i in range(20)]
+            mock_httpx_cls.return_value = mock_http
+            result = client.translate(para, "eng", "lug")
+
+        # Multiple chunks → joined with " "
+        assert mock_http.post.call_count > 1
+        assert " " in result  # chunks rejoined with space
+        # No \n\n in output (all sentence chunks from same paragraph)
+        assert "\n\n" not in result
+
     def test_translate_to_english_propagates_error(self):
         """translate_to_english raises TranslationError when API is down."""
         from src.translation import TranslationError
