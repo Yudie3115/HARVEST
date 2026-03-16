@@ -63,6 +63,22 @@ class TranslationClient:
         """Convenience wrapper: translate from English to target_lang."""
         return self.translate(text, "eng", target_lang)
 
+    def check_connection(self) -> bool:
+        """Return True if the Sunbird API is reachable and responds with 200."""
+        if not self._api_key:
+            return False
+        url = f"{self._base_url}/tasks/language_id"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.post(url, json={"text": "test"}, headers=headers)
+            return response.status_code == 200
+        except Exception:
+            return False
+
     def detect_language(self, text: str) -> str | None:
         """Detect the language of text.
 

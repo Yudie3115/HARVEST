@@ -119,9 +119,7 @@ def _check_connections() -> Dict[str, bool]:
         if settings.translation_enabled and settings.sunbird_api_key:
             from src.translation import TranslationClient
             t = TranslationClient()
-            # Cheap probe: detect language on a known English string
-            t.detect_language("test")
-            results["Sunbird AI (Translation)"] = True
+            results["Sunbird AI (Translation)"] = t.check_connection()
         else:
             results["Sunbird AI (Translation)"] = False
     except Exception:

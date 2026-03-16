@@ -235,3 +235,49 @@ class TestDetectLanguage:
             mock_httpx_cls.return_value = mock_http
             result = client.detect_language("Bonjour")
         assert result is None
+
+
+class TestCheckConnection:
+    def test_returns_true_when_api_responds_200(self):
+        client = _make_client()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.check_connection()
+        assert result is True
+
+    def test_returns_false_when_api_responds_non_200(self):
+        client = _make_client()
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.check_connection()
+        assert result is False
+
+    def test_returns_false_on_network_error(self):
+        client = _make_client()
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.side_effect = Exception("connection refused")
+            mock_httpx_cls.return_value = mock_http
+            result = client.check_connection()
+        assert result is False
+
+    def test_returns_false_when_api_key_empty(self):
+        client = _make_client(sunbird_api_key="")
+        with patch("httpx.Client") as mock_httpx:
+            result = client.check_connection()
+        assert result is False
+        mock_httpx.assert_not_called()
