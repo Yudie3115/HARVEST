@@ -347,7 +347,24 @@ with tab3:
 
     if query:
         with st.spinner("Searching…"):
-            results = _semantic_search(query, top_k=top_k)
+            from src.config.settings import settings
+            from src.translation import TranslationError
+            search_query = query
+            search_lang: str | None = None
+            if settings.translation_enabled:
+                translator = _get_translator()
+                if translator is not None:
+                    search_lang = translator.detect_language(query)
+                    if search_lang is not None:
+                        try:
+                            search_query = translator.translate_to_english(query, search_lang)
+                        except TranslationError:
+                            search_lang = None
+            results = _semantic_search(search_query, top_k=top_k)
+        if search_lang is not None:
+            from src.translation import SUPPORTED_LANGUAGES
+            lang_name = SUPPORTED_LANGUAGES.get(search_lang, search_lang)
+            st.caption(f"Searching in English (translated from {lang_name})")
 
         if results:
             st.write(f"Found **{len(results)}** relevant chunks")
