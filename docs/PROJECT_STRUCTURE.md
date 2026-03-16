@@ -3,14 +3,10 @@
 ## 📁 Complete File Tree
 
 ```
-postharvest-scraper/
-├── README.md                           # Project overview and quick start
-├── QUICKSTART.md                       # Detailed setup guide
-├── postharvest_scraper_architecture.md # Complete architecture documentation
+post-harvest-knowledge-scraper/
 ├── .env.example                        # Environment configuration template
-├── .gitignore                          # Git ignore rules
+├── .gitignore
 ├── pyproject.toml                      # Poetry dependencies
-├── requirements.txt                    # Pip dependencies (alternative)
 ├── docker-compose.yml                  # Infrastructure services
 ├── Makefile                            # Convenience commands
 │
@@ -19,73 +15,73 @@ postharvest-scraper/
 │   │
 │   ├── config/                         # Configuration
 │   │   ├── __init__.py
-│   │   ├── settings.py                 # Pydantic settings (database, LLM, etc.)
-│   │   └── site_configs.py             # Site-specific crawl configs
+│   │   ├── settings.py                 # Pydantic settings (all env vars) ✓
+│   │   └── site_configs.py             # Site-specific crawl configs ✓
 │   │
-│   ├── crawlers/                       # Web crawling implementations
+│   ├── crawlers/                       # Web crawling (stubs)
 │   │   ├── __init__.py
-│   │   ├── base.py                     # Base crawler class (TODO)
-│   │   ├── playwright_crawler.py       # Dynamic content crawler (TODO)
-│   │   └── scrapy_crawler.py           # Static content crawler (TODO)
+│   │   ├── base.py
+│   │   ├── playwright_crawler.py
+│   │   └── scrapy_crawler.py
 │   │
-│   ├── extractors/                     # Content extraction
+│   ├── extractors/                     # Content extraction ✓
 │   │   ├── __init__.py
-│   │   ├── pdf_extractor.py            # PDF text/table extraction (TODO)
-│   │   ├── html_extractor.py           # HTML content extraction (TODO)
-│   │   └── video_extractor.py          # Video metadata extraction (TODO)
+│   │   ├── pdf_extractor.py            # PDF text/table extraction ✓
+│   │   ├── html_extractor.py           # HTML content extraction ✓
+│   │   └── video_extractor.py          # Video metadata extraction ✓
 │   │
-│   ├── llm/                            # LLM integration
+│   ├── llm/                            # LLM integration ✓
 │   │   ├── __init__.py
 │   │   ├── client.py                   # Unified OpenAI/Ollama client ✓
-│   │   ├── prompts.py                  # Prompt templates (TODO)
-│   │   └── embeddings.py               # Embedding generation (TODO)
+│   │   ├── prompts.py                  # Prompt templates ✓
+│   │   └── embeddings.py               # Embedding generation ✓
 │   │
-│   ├── storage/                        # Data persistence
+│   ├── storage/                        # Data persistence ✓
 │   │   ├── __init__.py
 │   │   ├── models.py                   # SQLAlchemy models ✓
 │   │   ├── postgres.py                 # PostgreSQL client ✓
 │   │   ├── minio_client.py             # MinIO object storage ✓
-│   │   └── vector_db.py                # Qdrant vector database (TODO)
+│   │   └── vector_db.py                # Qdrant vector database ✓
 │   │
-│   ├── flows/                          # Prefect workflows
+│   ├── translation/                    # Sunbird AI translation ✓
+│   │   ├── __init__.py                 # Exports TranslationClient, TranslationError, SUPPORTED_LANGUAGES ✓
+│   │   └── client.py                   # Sunbird API: translate, detect_language, check_connection ✓
+│   │
+│   ├── flows/                          # Prefect workflows ✓
 │   │   ├── __init__.py
 │   │   ├── discovery.py                # Discovery pipeline ✓
-│   │   ├── processing.py               # Processing pipeline (TODO)
-│   │   └── orchestration.py            # Main orchestration (TODO)
+│   │   ├── processing.py               # Processing pipeline ✓
+│   │   └── orchestration.py            # Main orchestration ✓
 │   │
-│   └── utils/                          # Utility functions
+│   └── utils/                          # Utility functions ✓
 │       ├── __init__.py
-│       ├── logging.py                  # Logging configuration (TODO)
-│       ├── hashing.py                  # File hashing utilities (TODO)
-│       └── text_processing.py          # Text utilities (TODO)
+│       ├── logging.py                  # Loguru configuration ✓
+│       ├── hashing.py                  # SHA-256 file hashing ✓
+│       └── text_processing.py          # Chunking, cleaning ✓
 │
-├── dashboard/                          # Streamlit dashboard
-│   ├── app.py                          # Main dashboard ✓ (basic)
-│   ├── pages/                          # Multi-page app pages (TODO)
-│   │   ├── 1_documents.py
-│   │   ├── 2_search.py
-│   │   └── 3_analytics.py
-│   └── components/                     # Reusable components (TODO)
-│       ├── metrics.py
-│       └── charts.py
+├── dashboard/                          # Streamlit dashboard ✓
+│   └── app.py                          # Overview, Documents, Search, Q&A, Config tabs ✓
 │
 ├── scripts/                            # Admin and setup scripts
-│   ├── __init__.py
 │   ├── init_db.py                      # Database initialization ✓
-│   ├── deploy_flows.py                 # Deploy Prefect workflows (TODO)
-│   └── export_dataset.py               # Export knowledge base (TODO)
+│   ├── deploy_flows.py                 # Deploy Prefect workflows ✓
+│   └── smoke_test.py                   # End-to-end feature smoke test ✓
 │
-├── tests/                              # Test suite
+├── tests/                              # Test suite (110 tests) ✓
 │   ├── __init__.py
-│   ├── test_crawlers.py                # Crawler tests (TODO)
-│   ├── test_extractors.py              # Extractor tests (TODO)
-│   ├── test_llm.py                     # LLM integration tests (TODO)
-│   └── test_storage.py                 # Storage tests (TODO)
+│   ├── test_extractors.py              # HTML, PDF, VTT extraction ✓
+│   ├── test_llm.py                     # LLM client, classification, embeddings ✓
+│   ├── test_storage.py                 # VectorDBClient, PostgresClient ✓
+│   ├── test_translation_client.py      # TranslationClient (all HTTP mocked) ✓
+│   └── test_utils.py                   # Hashing, text processing, chunking ✓
 │
-├── docs/                               # Additional documentation
-│   ├── deployment.md                   # Production deployment (TODO)
-│   ├── api.md                          # API documentation (TODO)
-│   └── troubleshooting.md              # Common issues (TODO)
+├── docs/                               # Documentation
+│   ├── QUICKSTART.md                   # Setup and usage guide ✓
+│   ├── PROJECT_STRUCTURE.md            # This file ✓
+│   ├── postharvest_scraper_architecture.md  # Architecture overview ✓
+│   └── superpowers/                    # Design specs and implementation plans
+│       ├── specs/
+│       └── plans/
 │
 └── logs/                               # Application logs (created at runtime)
     └── scraper.log
@@ -93,80 +89,50 @@ postharvest-scraper/
 
 ## ✅ Implementation Status
 
-### Core Infrastructure (Complete)
-- ✅ Docker Compose setup
-- ✅ Environment configuration
+### Core Infrastructure
+- ✅ Docker Compose setup (PostgreSQL, MinIO, Qdrant, Prefect)
+- ✅ Environment configuration (Pydantic settings)
 - ✅ Database models (SQLAlchemy)
 - ✅ PostgreSQL client
 - ✅ MinIO client
 - ✅ Database initialization script
 
-### LLM Integration (Complete)
-- ✅ Unified LLM client (OpenAI + Ollama)
+### LLM Integration
+- ✅ Unified LLM client (OpenAI + Ollama with auto-detection)
 - ✅ URL classification
 - ✅ Content classification
-- ✅ Auto-provider detection
+- ✅ Prompt templates
+- ✅ Embedding generation (OpenAI text-embedding-3-small / sentence-transformers fallback)
 
-### Discovery Pipeline (Complete)
-- ✅ Basic crawling logic
+### Discovery Pipeline
+- ✅ Crawling logic
 - ✅ LLM-powered URL filtering
 - ✅ Document metadata extraction
 - ✅ Prefect flow structure
 
-### Dashboard (Basic Implementation)
-- ✅ Basic Streamlit app
-- ✅ Layout and navigation
-- ⚠️ Needs database integration
-- ⚠️ Needs real-time metrics
+### Processing Pipeline
+- ✅ HTML content extraction (Trafilatura)
+- ✅ PDF extraction (PyMuPDF + pdfplumber)
+- ✅ Video metadata extraction (yt-dlp)
+- ✅ Text chunking
+- ✅ Qdrant vector database integration
+- ✅ End-to-end processing flow
 
-### To Be Implemented
+### Translation
+- ✅ Sunbird AI integration (Luganda, Acholi, Runyankole, Ateso, Lugbara)
+- ✅ Automatic language detection
+- ✅ Bidirectional translation (query → English → answer → local language)
+- ✅ Graceful degradation (always falls back to English on failure)
 
-**High Priority:**
-1. Content extractors (PDF, HTML, video)
-2. Processing pipeline (Prefect flow)
-3. Vector database integration (Qdrant)
-4. Embedding generation
-5. Dashboard database integration
+### Dashboard
+- ✅ Overview: document counts, processing rate, crawl activity chart
+- ✅ Documents: filterable document browser with DB integration
+- ✅ Search: semantic search with translation support
+- ✅ Knowledge Base Q&A: RAG with translation support
+- ✅ Configuration: LLM/crawl settings, connection health checker
 
-**Medium Priority:**
-6. Advanced crawlers (Playwright, Scrapy)
-7. Prompt templates system
-8. Search functionality
-9. Quality checks and validation
-10. Error recovery mechanisms
-
-**Lower Priority:**
-11. Export functionality
-12. Analytics and reporting
-13. API endpoints
-14. Comprehensive test suite
-15. Advanced monitoring
-
-## 🎯 Implementation Roadmap
-
-### Phase 1: MVP (1-2 weeks)
-- [ ] PDF extractor implementation
-- [ ] HTML extractor implementation
-- [ ] Processing Prefect flow
-- [ ] Qdrant integration
-- [ ] Embedding generation
-- [ ] Dashboard database connection
-
-### Phase 2: Production Ready (2-3 weeks)
-- [ ] Advanced crawlers (Playwright)
-- [ ] Complete error handling
-- [ ] Retry mechanisms
-- [ ] Search functionality
-- [ ] Full dashboard features
-- [ ] Deployment documentation
-
-### Phase 3: Advanced Features (3-4 weeks)
-- [ ] Advanced analytics
-- [ ] Quality scoring system
-- [ ] API endpoints
-- [ ] Export functionality
-- [ ] Scheduled reprocessing
-- [ ] Performance optimization
+### Testing
+- ✅ 110 unit tests across all modules (no live services required)
 
 ## 🔧 File Descriptions
 
@@ -194,95 +160,73 @@ postharvest-scraper/
 
 **src/config/settings.py**
 - Pydantic settings model
-- Environment variable loading
-- Configuration validation
+- Environment variable loading for all services (DB, LLM, MinIO, Qdrant, Prefect, Sunbird AI)
 
 **src/config/site_configs.py**
-- Site-specific crawl strategies
-- URL patterns and exclusions
-- Rate limits and headers
+- Site-specific crawl strategies for NARO, MoA, Extension, UBOS
+- URL patterns, rate limits, and keyword filters
 
 **src/llm/client.py**
-- Unified LLM interface
-- OpenAI and Ollama support
-- Automatic provider selection
-- Retry logic and error handling
+- Unified LLM interface (OpenAI + Ollama)
+- Automatic provider selection based on available API key
+- URL classification and content classification
+
+**src/llm/embeddings.py**
+- Embedding generation (OpenAI text-embedding-3-small / sentence-transformers fallback)
+- Batch embedding support
 
 **src/storage/models.py**
-- SQLAlchemy ORM models
-- Database schema definitions
-- Relationships and indexes
+- SQLAlchemy ORM models (documents, crawl_runs, classifications, processing_queue)
 
 **src/storage/postgres.py**
-- Database operations
-- CRUD methods
-- Query helpers
-- Statistics functions
+- Document CRUD, crawl statistics, status queries
 
 **src/storage/minio_client.py**
-- Object storage operations
-- Upload/download files
-- Presigned URLs
-- Bucket management
+- Object storage for raw documents (PDFs, HTML snapshots)
 
-**src/flows/discovery.py**
-- Prefect discovery workflow
-- Site crawling
-- URL classification
-- Document metadata extraction
+**src/storage/vector_db.py**
+- Qdrant client: upsert, search, collection management
 
-### Scripts
+**src/translation/client.py**
+- Sunbird AI REST API client
+- `translate()`: single or chunked translation with retry (429/503/504)
+- `detect_language()`: confidence-threshold language detection
+- `check_connection()`: connectivity probe for the status dashboard
 
-**scripts/init_db.py**
-- Creates database tables
-- Initializes indexes
-- Verifies schema
+**src/translation/__init__.py**
+- Public exports: `TranslationClient`, `TranslationError`, `SUPPORTED_LANGUAGES`
+- Supported codes: `eng`, `lug`, `ach`, `nyn`, `teo`, `lgg`
+
+**src/flows/discovery.py** / **processing.py** / **orchestration.py**
+- Prefect flows: daily full crawl, hourly incremental, weekly retry
 
 ### Dashboard
 
 **dashboard/app.py**
-- Streamlit web interface
-- System monitoring
-- Configuration management
-- Document browser
+- Overview, Documents, Search, Knowledge Base Q&A, Configuration tabs
+- Translation pre/post-processing in Search and Q&A tabs
+- `_get_translator()` cached resource; graceful degradation on Sunbird failures
+
+### Scripts
+
+**scripts/init_db.py** — creates database tables and indexes
+**scripts/deploy_flows.py** — deploys Prefect flows with schedules
+**scripts/smoke_test.py** — end-to-end feature verification (6 sections, ~11 checks)
 
 ## 🚀 Getting Started
 
-1. **Extract the zip file**
-   ```bash
-   unzip postharvest-scraper.zip
-   cd postharvest-scraper
-   ```
+See `docs/QUICKSTART.md` for the full setup guide.
 
-2. **Follow QUICKSTART.md**
-   - Install dependencies
-   - Configure environment
-   - Start services
-   - Initialize database
-
-3. **Run first crawl**
-   ```bash
-   poetry run python -c "from src.flows.discovery import discover_content; discover_content('naro')"
-   ```
-
-## 📝 Notes for Claude Code
-
-When implementing remaining features:
-
-1. **Follow existing patterns**: Use the same structure as completed modules
-2. **Use type hints**: All functions should have type annotations
-3. **Add logging**: Use loguru for consistent logging
-4. **Error handling**: Wrap operations in try/except with retries
-5. **Test incrementally**: Implement and test each module before moving on
-6. **Update this document**: Mark items as complete when implemented
-
-## 🤝 Contributing
-
-This project structure is designed for iterative development. Start with the high-priority items and work your way down. Each module is relatively independent, so they can be implemented in parallel if needed.
+```bash
+git clone <repo-url>
+cd post-harvest-knowledge-scraper
+poetry install
+docker compose up -d
+poetry run python scripts/init_db.py
+poetry run streamlit run dashboard/app.py
+```
 
 ---
 
 **Legend:**
 - ✅ = Fully implemented and tested
-- ⚠️ = Partially implemented
-- TODO = Not yet implemented

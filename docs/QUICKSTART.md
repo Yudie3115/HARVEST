@@ -60,6 +60,16 @@ cp .env.example .env
 # OPENAI_API_KEY=sk-...
 ```
 
+**Optional: Translation (Ugandan local languages)**
+
+To enable bidirectional translation between English and Luganda, Acholi, Runyankole, Ateso, or Lugbara, add a [Sunbird AI](https://sunbird.ai) API key:
+
+```dotenv
+SUNBIRD_API_KEY=your_sunbird_api_key_here
+```
+
+If `SUNBIRD_API_KEY` is empty, the translation feature is automatically disabled — no warnings or errors.
+
 For a **fully local, no-cost** setup using Ollama instead:
 
 ```bash
@@ -184,7 +194,7 @@ poetry run pytest tests/ -v
 
 Expected output:
 ```
-62 passed in ~2s
+110 passed in ~3s
 ```
 
 Test coverage by module:
@@ -195,6 +205,7 @@ Test coverage by module:
 | `tests/test_extractors.py` | HTML extraction, PDF parsing, VTT parsing, video metadata |
 | `tests/test_llm.py` | URL classification, content classification, prompt builders, embeddings |
 | `tests/test_storage.py` | VectorDBClient (Qdrant), PostgresClient – all with mocks |
+| `tests/test_translation_client.py` | TranslationClient: translate, detect_language, check_connection, retry logic, text chunking – all with mocked HTTP |
 
 Run a single test file:
 
@@ -393,8 +404,9 @@ Tabs available:
 |-----|----------|
 | Overview | Live document counts, processing rate, vectors indexed, crawl activity chart |
 | Documents | Searchable/filterable table of all discovered documents |
-| Search | Semantic search across processed chunks in Qdrant |
-| Configuration | LLM/crawl settings, service connection health checker |
+| Search | Semantic search across processed chunks in Qdrant; auto-translates queries from local Ugandan languages |
+| Knowledge Base Q&A | Ask questions in English or a local Ugandan language; get grounded answers translated back to your language |
+| Configuration | LLM/crawl settings, service connection health checker (PostgreSQL, MinIO, Qdrant, LLM, Prefect, Sunbird AI) |
 
 ---
 

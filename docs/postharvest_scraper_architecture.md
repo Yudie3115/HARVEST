@@ -62,6 +62,13 @@ A production-grade web scraping and content processing system designed to build 
 - **LangChain** - LLM orchestration & prompting
 - **OpenAI Embeddings** - text-embedding-3-small (default) or sentence-transformers (local fallback)
 
+### Translation
+- **Sunbird AI API** - Bidirectional translation for Ugandan local languages (Luganda, Acholi, Runyankole, Ateso, Lugbara)
+  - `POST /tasks/language_id` — language detection with confidence score
+  - `POST /tasks/nllb_translate` — NLLB-based neural translation
+  - Bearer token auth; 3-attempt exponential backoff on transient errors
+  - Optional: feature disabled automatically when `SUNBIRD_API_KEY` is empty
+
 ### Monitoring & UI
 - **Streamlit** - Dashboard & admin interface
 - **Prefect UI** - Workflow monitoring
@@ -462,7 +469,42 @@ def download_document(url: str) -> str:
         raise  # Prefect will retry
 ```
 
-### 5. Streamlit Dashboard
+### 5. Translation Layer
+
+Translation is a thin wrapper at the dashboard layer. The RAG pipeline (embeddings, Qdrant, LLM) operates entirely on English text.
+
+**Q&A flow:**
+```
+User query (any language)
+      → Language detection (Sunbird /tasks/language_id)
+      → [if local language] Translate to English (Sunbird /tasks/nllb_translate)
+      → Embed English query → Qdrant search → LLM synthesis
+      → [if local language] Translate answer back
+      → Display answer + "Detected: Luganda — answering in Luganda" badge
+```
+
+**Search flow:**
+```
+User query (any language)
+      → Language detection
+      → [if local language] Translate to English (silent)
+      → Embed → Qdrant search
+      → Display results in English + "Searching in English (translated from Luganda)" caption
+```
+
+**Supported languages:** English (`eng`), Luganda (`lug`), Acholi (`ach`), Runyankole (`nyn`), Ateso (`teo`), Lugbara (`lgg`)
+
+**Graceful degradation:**
+
+| Failure | Behaviour |
+|---|---|
+| Sunbird unreachable | Proceed in English; no badge shown |
+| Low detection confidence (< 0.80) | Treat as English |
+| Query translation fails | Proceed with original text |
+| Answer translation fails | Return English answer with note |
+| `TRANSLATION_ENABLED=false` | Skip entirely; zero overhead |
+
+### 6. Streamlit Dashboard
 
 **Features:**
 
@@ -1131,5 +1173,10 @@ volumes:
 4. **Completeness:** % of discovered docs successfully processed
 5. **Search quality:** User feedback on search results
 
-# Next Steps
-- Look into translation. See how Hugging Face can assist with that.
+## Next Steps / Future Work
+
+- **TTS/STT:** Sunbird AI exposes `/tasks/tts` and `/tasks/stt` endpoints — voice query input and audio answer output when needed
+- **Source translation:** Translate scraped document content at ingest time for local-language indexing
+- **Advanced crawlers:** Playwright and Scrapy implementations for JavaScript-heavy sites
+- **Export functionality:** Download knowledge base as structured dataset
+- **API endpoints:** REST API layer over the RAG pipeline

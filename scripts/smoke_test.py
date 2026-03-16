@@ -261,6 +261,29 @@ def check_semantic_search():
     return len(results)
 
 
+def check_translation():
+    """Probe Sunbird AI translation API.
+
+    Returns the detected language code for a known Luganda phrase, or 'skipped'
+    if SUNBIRD_API_KEY is not configured.
+    """
+    from src.config.settings import settings
+
+    if not settings.sunbird_api_key:
+        raise RuntimeError("SUNBIRD_API_KEY not set – skipping translation check")
+
+    from src.translation import TranslationClient
+    client = TranslationClient()
+
+    # Connection probe
+    assert client.check_connection(), "Sunbird API not reachable (check_connection returned False)"
+
+    # Language detection probe: "Oli otya" is Luganda for "How are you?"
+    lang = client.detect_language("Oli otya")
+    # May return None if confidence is low or API treats it as ambiguous
+    return lang or "connected (detection returned None – low confidence or short input)"
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -350,6 +373,21 @@ def main():
                skip=not (emb_ok and qdrant_ok))
     if sr is not None:
         print(f"         → {sr} results (0 is OK if no docs processed yet)")
+
+    # ── Translation (bonus) ──────────────────────────────────────
+    section("Bonus  Translation (Sunbird AI)")
+    from src.config.settings import settings as _settings
+    translation_configured = bool(_settings.sunbird_api_key and _settings.translation_enabled)
+    tr = check(
+        "Sunbird AI connection + language detection",
+        check_translation,
+        skip=not translation_configured,
+    )
+    if tr is not None:
+        if not translation_configured:
+            print("         → SUNBIRD_API_KEY not set; set it in .env to enable translation")
+        else:
+            print(f"         → {tr}")
 
     # ── Summary ──────────────────────────────────────────────────
     print(f"\n{'=' * 60}")
