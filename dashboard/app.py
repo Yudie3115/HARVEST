@@ -113,6 +113,20 @@ def _check_connections() -> Dict[str, bool]:
     except Exception:
         results["LLM Service"] = False
 
+    # Sunbird AI (translation)
+    try:
+        from src.config.settings import settings
+        if settings.translation_enabled and settings.sunbird_api_key:
+            from src.translation import TranslationClient
+            t = TranslationClient()
+            # Cheap probe: detect language on a known English string
+            t.detect_language("test")
+            results["Sunbird AI (Translation)"] = True
+        else:
+            results["Sunbird AI (Translation)"] = False
+    except Exception:
+        results["Sunbird AI (Translation)"] = False
+
     # Prefect
     try:
         import httpx
