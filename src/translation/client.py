@@ -69,6 +69,7 @@ class TranslationClient:
             return False
         url = f"{self._base_url}/tasks/language_id"
         headers = {
+            "accept": "application/json",
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
@@ -93,6 +94,7 @@ class TranslationClient:
 
         url = f"{self._base_url}/tasks/language_id"
         headers = {
+            "accept": "application/json",
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
@@ -106,9 +108,11 @@ class TranslationClient:
 
             data = response.json()
             lang = data.get("language")
-            confidence = data.get("confidence", 0.0)
 
-            if confidence < self._min_confidence:
+            # The language_id API does not always return a confidence score.
+            # Only apply the threshold when the field is explicitly present.
+            confidence = data.get("confidence")
+            if confidence is not None and confidence < self._min_confidence:
                 return None
 
             from src.translation import SUPPORTED_LANGUAGES
@@ -127,16 +131,22 @@ class TranslationClient:
 
     def _translate_chunk(self, text: str, source_lang: str, target_lang: str) -> str:
         """Send a single translation request with retry logic."""
-        url = f"{self._base_url}/tasks/nllb_translate"
+        url = f"{self._base_url}/tasks/translate"
         payload = {
             "source_language": source_lang,
             "target_language": target_lang,
             "text": text,
         }
         headers = {
+            "accept": "application/json",
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+
+        logger.debug(
+            f"Sunbird translate → POST {url} "
+            f"(source={source_lang}, target={target_lang}, len={len(text)})"
+        )
 
         last_exc: Exception | None = None
         last_status: int | None = None
@@ -145,13 +155,21 @@ class TranslationClient:
                 with httpx.Client(timeout=self._timeout) as client:
                     response = client.post(url, json=payload, headers=headers)
 
+                logger.debug(
+                    f"Sunbird translate ← {response.status_code} "
+                    f"(attempt {attempt + 1}/{_MAX_RETRIES}), "
+                    f"url={response.url}, body={response.text[:200]!r}"
+                )
+
                 if response.status_code == 200:
                     data = response.json()
-                    if "translated_text" not in data:
+                    # The API wraps the result: {"output": {"translated_text": ...}}
+                    output = data.get("output", data)
+                    if "translated_text" not in output:
                         raise TranslationError(
                             f"Sunbird API returned 200 but missing 'translated_text' key: {data}"
                         )
-                    return data["translated_text"]
+                    return output["translated_text"]
 
                 if response.status_code in _TRANSIENT_STATUS_CODES:
                     last_status = response.status_code
@@ -163,7 +181,11 @@ class TranslationClient:
                     time.sleep(wait)
                     continue
 
-                # Non-retryable HTTP error
+                # Non-retryable HTTP error — log full detail to aid debugging
+                logger.error(
+                    f"Sunbird translate failed: {response.status_code} {response.reason_phrase} "
+                    f"url={response.url!r} body={response.text!r}"
+                )
                 raise TranslationError(
                     f"Sunbird API error {response.status_code}: {response.text}"
                 )

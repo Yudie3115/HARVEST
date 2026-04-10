@@ -57,7 +57,7 @@ class TestTranslate:
         client = _make_client()
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"translated_text": "Oli otya"}
+        mock_response.json.return_value = {"output": {"translated_text": "Oli otya"}}
         with patch("httpx.Client") as mock_httpx_cls:
             mock_http = MagicMock()
             mock_http.__enter__ = MagicMock(return_value=mock_http)
@@ -75,7 +75,7 @@ class TestTranslate:
         fail_response.status_code = 503
         ok_response = MagicMock()
         ok_response.status_code = 200
-        ok_response.json.return_value = {"translated_text": "Wayigiriza ki?"}
+        ok_response.json.return_value = {"output": {"translated_text": "Wayigiriza ki?"}}
         with patch("httpx.Client") as mock_httpx_cls:
             mock_http = MagicMock()
             mock_http.__enter__ = MagicMock(return_value=mock_http)
@@ -112,8 +112,8 @@ class TestTranslate:
         para2 = "Second paragraph about drying methods. " * 8  # ~312 chars
         text = para1.strip() + "\n\n" + para2.strip()          # ~610 chars total
         responses = [
-            MagicMock(status_code=200, **{"json.return_value": {"translated_text": "Omurongo ogwa kubiri."}}),
-            MagicMock(status_code=200, **{"json.return_value": {"translated_text": "Omurongo ogwa kabiri."}}),
+            MagicMock(status_code=200, **{"json.return_value": {"output": {"translated_text": "Omurongo ogwa kubiri."}}}),
+            MagicMock(status_code=200, **{"json.return_value": {"output": {"translated_text": "Omurongo ogwa kabiri."}}}),
         ]
         with patch("httpx.Client") as mock_httpx_cls:
             mock_http = MagicMock()
@@ -149,7 +149,7 @@ class TestTranslate:
             mock_http = MagicMock()
             mock_http.__enter__ = MagicMock(return_value=mock_http)
             mock_http.__exit__ = MagicMock(return_value=False)
-            mock_http.post.side_effect = [MagicMock(status_code=200, **{"json.return_value": {"translated_text": f"chunk{i}"}}) for i in range(20)]
+            mock_http.post.side_effect = [MagicMock(status_code=200, **{"json.return_value": {"output": {"translated_text": f"chunk{i}"}}}) for i in range(20)]
             mock_httpx_cls.return_value = mock_http
             result = client.translate(para, "eng", "lug")
 
@@ -235,6 +235,21 @@ class TestDetectLanguage:
             mock_httpx_cls.return_value = mock_http
             result = client.detect_language("How are you?")
         assert result is None
+
+    def test_no_confidence_field_still_returns_language(self):
+        """API omits confidence → don't apply threshold, return language code."""
+        client = _make_client(translation_min_confidence=0.80)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"language": "lug"}  # no confidence field
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.return_value = mock_response
+            mock_httpx_cls.return_value = mock_http
+            result = client.detect_language("Oli otya")
+        assert result == "lug"
 
     def test_empty_api_key_returns_none_without_network(self):
         client = _make_client(sunbird_api_key="")
