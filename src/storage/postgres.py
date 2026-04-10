@@ -209,6 +209,8 @@ class PostgresClient:
                 doc.file_size_bytes = file_size_bytes
                 doc.mime_type = mime_type
                 session.commit()
+            else:
+                logger.warning(f"update_document_file_info: document {document_id} not found, skipping")
 
     # Classification methods
     

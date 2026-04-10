@@ -81,3 +81,20 @@ class TestUpdateDocumentFileInfo:
         assert doc.file_size_bytes == 12345
         assert doc.mime_type == "application/pdf"
         session.commit.assert_called_once()
+
+    def test_no_op_when_document_not_found(self):
+        session = MagicMock()
+        session.__enter__ = lambda s: s
+        session.__exit__ = MagicMock(return_value=False)
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        db = self._make_db(session)
+        db.update_document_file_info(
+            document_id=uuid4(),
+            file_path="x.pdf",
+            file_hash="a" * 64,
+            file_size_bytes=100,
+            mime_type="application/pdf",
+        )
+
+        session.commit.assert_not_called()
