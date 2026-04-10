@@ -252,8 +252,8 @@ with st.sidebar:
 st.title("📊 Post-Harvest Knowledge Scraper")
 st.caption("Real-time monitoring and management dashboard")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📊 Overview", "📄 Documents", "🔍 Search", "🤖 Knowledge Base Q&A", "⚙️ Configuration"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["📊 Overview", "📄 Documents", "🔍 Search", "🤖 Knowledge Base Q&A", "⚙️ Configuration", "➕ Add Document"]
 )
 
 # ---------------------------------------------------------------------------
@@ -589,6 +589,121 @@ with tab5:
         st.dataframe(pd.DataFrame(status_rows), use_container_width=True)
     else:
         st.caption("Click 'Check Connections' to test service connectivity.")
+
+# ---------------------------------------------------------------------------
+# Tab 6: Add Document
+# ---------------------------------------------------------------------------
+
+with tab6:
+    st.subheader("➕ Add Document")
+    st.caption(
+        "Upload a file or provide a URL to add a document to the knowledge base. "
+        "Documents are classified by the LLM — those with a relevance score below "
+        "the configured threshold are rejected automatically."
+    )
+
+    upload_tab, url_tab = st.tabs(["📁 Upload File", "🔗 From URL"])
+
+    with upload_tab:
+        uploaded_file = st.file_uploader(
+            "Choose a file",
+            type=["pdf", "docx", "doc", "html", "htm"],
+            help="Supported formats: PDF, Word (.docx/.doc), HTML",
+        )
+        file_title = st.text_input("Title (optional)", key="file_title")
+        file_site = st.text_input("Source / site name", value="manual", key="file_site")
+
+        if st.button("Add File to Knowledge Base", type="primary", key="add_file_btn"):
+            if uploaded_file is None:
+                st.warning("Please select a file first.")
+            else:
+                with st.spinner(f"Processing {uploaded_file.name}…"):
+                    try:
+                        from src.flows.manual_ingestion import ingest_manual_document
+                        result = ingest_manual_document(
+                            content=uploaded_file.read(),
+                            filename=uploaded_file.name,
+                            title=file_title or None,
+                            site_name=file_site or "manual",
+                        )
+                    except Exception as exc:
+                        st.error(f"Ingestion error: {exc}")
+                        result = None
+
+                if result:
+                    if result["status"] == "processed":
+                        score = result.get("relevance_score")
+                        score_str = f"{score:.1f}/10" if isinstance(score, (int, float)) else "N/A"
+                        st.success(
+                            f"Document added successfully! "
+                            f"{result['chunks']} chunks indexed. "
+                            f"Relevance score: {score_str}"
+                        )
+                    elif result["status"] == "skipped":
+                        reason = result.get("reason", "unknown")
+                        score = result.get("relevance_score")
+                        score_str = f" (score: {score:.1f}/10)" if isinstance(score, (int, float)) else ""
+                        if reason == "low_relevance":
+                            st.warning(
+                                f"Document rejected — not relevant enough to post-harvest "
+                                f"knowledge{score_str}. It will not appear in search results."
+                            )
+                        else:
+                            st.warning(
+                                "Document skipped — no extractable text content was found."
+                            )
+                    else:
+                        st.error("Ingestion failed. Check the application logs for details.")
+
+    with url_tab:
+        doc_url = st.text_input(
+            "Document URL",
+            placeholder="https://example.org/maize-storage-guide.pdf",
+            key="url_input",
+        )
+        url_title = st.text_input("Title (optional)", key="url_title")
+        url_site = st.text_input("Source / site name", value="manual", key="url_site")
+
+        if st.button("Add URL to Knowledge Base", type="primary", key="add_url_btn"):
+            if not doc_url.strip():
+                st.warning("Please enter a URL first.")
+            else:
+                with st.spinner(f"Downloading and processing {doc_url}…"):
+                    try:
+                        from src.flows.manual_ingestion import ingest_manual_document
+                        result = ingest_manual_document(
+                            url=doc_url.strip(),
+                            title=url_title or None,
+                            site_name=url_site or "manual",
+                        )
+                    except Exception as exc:
+                        st.error(f"Ingestion error: {exc}")
+                        result = None
+
+                if result:
+                    if result["status"] == "processed":
+                        score = result.get("relevance_score")
+                        score_str = f"{score:.1f}/10" if isinstance(score, (int, float)) else "N/A"
+                        st.success(
+                            f"Document added successfully! "
+                            f"{result['chunks']} chunks indexed. "
+                            f"Relevance score: {score_str}"
+                        )
+                    elif result["status"] == "skipped":
+                        reason = result.get("reason", "unknown")
+                        score = result.get("relevance_score")
+                        score_str = f" (score: {score:.1f}/10)" if isinstance(score, (int, float)) else ""
+                        if reason == "low_relevance":
+                            st.warning(
+                                f"Document rejected — not relevant enough to post-harvest "
+                                f"knowledge{score_str}. It will not appear in search results."
+                            )
+                        else:
+                            st.warning(
+                                "Document skipped — no extractable text content was found."
+                            )
+                    else:
+                        st.error("Ingestion failed. Check the application logs for details.")
 
 # Footer
 st.divider()
