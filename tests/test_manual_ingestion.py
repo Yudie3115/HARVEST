@@ -98,3 +98,177 @@ class TestUpdateDocumentFileInfo:
         )
 
         session.commit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# ingest_manual_document tests
+# ---------------------------------------------------------------------------
+
+FAKE_DOC_ID = str(uuid4())
+FAKE_CRAWL_RUN_ID = uuid4()
+
+
+def _make_fake_doc():
+    doc = MagicMock()
+    doc.id = UUID(FAKE_DOC_ID)
+    return doc
+
+
+def _make_fake_crawl_run():
+    run = MagicMock()
+    run.id = FAKE_CRAWL_RUN_ID
+    return run
+
+
+def _make_good_classification(score=7.5):
+    return {
+        "relevance_score": score,
+        "topics": ["storage"],
+        "crops": ["maize"],
+        "regions": ["Uganda"],
+        "document_type": "extension_guide",
+        "target_audience": ["farmers"],
+        "language": "en",
+        "summary": "A guide to maize storage.",
+        "key_practices": [],
+        "actionable": True,
+        "has_data": False,
+        "llm_model": "gpt-4o-mini",
+        "llm_metadata": {},
+    }
+
+
+@pytest.fixture
+def ingestion_mocks():
+    """Patch all external dependencies for ingest_manual_document."""
+    fake_doc = _make_fake_doc()
+    fake_run = _make_fake_crawl_run()
+
+    fake_db = MagicMock()
+    fake_db.get_or_create_manual_crawl_run.return_value = fake_run
+    fake_db.create_document.return_value = fake_doc
+    fake_db.create_classification.return_value = MagicMock()
+
+    fake_minio = MagicMock()
+
+    with patch("src.flows.manual_ingestion.PostgresClient", return_value=fake_db), \
+         patch("src.flows.manual_ingestion.MinIOClient", return_value=fake_minio), \
+         patch("src.flows.manual_ingestion.extract_content", return_value="Long extracted text about maize storage " * 20) as mock_extract, \
+         patch("src.flows.manual_ingestion.classify_document_content", return_value=_make_good_classification()) as mock_classify, \
+         patch("src.flows.manual_ingestion.chunk_and_embed", return_value=[{"chunk_index": 0}] * 3) as mock_chunk, \
+         patch("src.flows.manual_ingestion.store_chunks", return_value=3) as mock_store, \
+         patch("src.flows.manual_ingestion.download_document") as mock_download, \
+         patch("src.flows.manual_ingestion.hash_content", return_value="a" * 64):
+        yield {
+            "db": fake_db,
+            "minio": fake_minio,
+            "extract": mock_extract,
+            "classify": mock_classify,
+            "chunk": mock_chunk,
+            "store": mock_store,
+            "download": mock_download,
+        }
+
+
+class TestIngestManualDocument:
+    def test_file_bytes_produces_processed_result(self, ingestion_mocks):
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(
+            content=b"%PDF fake content",
+            filename="guide.pdf",
+            title="Maize Storage Guide",
+        )
+
+        assert result["status"] == "processed"
+        assert result["chunks"] == 3
+        assert result["relevance_score"] == 7.5
+        # MinIO upload must happen
+        ingestion_mocks["minio"].upload_bytes.assert_called_once()
+        # download_document must NOT be called for file uploads
+        ingestion_mocks["download"].assert_not_called()
+
+    def test_url_ingestion_calls_download_document(self, ingestion_mocks):
+        ingestion_mocks["download"].return_value = {
+            "minio_path": "fakeid.pdf",
+            "file_hash": "b" * 64,
+            "file_size": 5000,
+            "mime_type": "application/pdf",
+            "doc_type": "pdf",
+            "content": b"fake pdf bytes",
+        }
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(url="https://example.org/guide.pdf")
+
+        assert result["status"] == "processed"
+        ingestion_mocks["download"].assert_called_once()
+        # MinIO.upload_bytes must NOT be called — download_document handles it
+        ingestion_mocks["minio"].upload_bytes.assert_not_called()
+
+    def test_low_relevance_returns_skipped(self, ingestion_mocks):
+        ingestion_mocks["classify"].return_value = _make_good_classification(score=3.0)
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"irrelevant bytes", filename="random.pdf")
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "low_relevance"
+        assert result["relevance_score"] == 3.0
+        # Classification should be stored even for skipped docs
+        ingestion_mocks["db"].create_classification.assert_called_once()
+        # No chunks should be stored
+        ingestion_mocks["store"].assert_not_called()
+
+    def test_no_extractable_content_returns_skipped(self, ingestion_mocks):
+        ingestion_mocks["extract"].return_value = None
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"unreadable", filename="scan.pdf")
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_content"
+        ingestion_mocks["classify"].assert_not_called()
+
+    def test_missing_both_content_and_url_raises(self):
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        with pytest.raises(ValueError, match="content.*url|url.*content"):
+            ingest_manual_document()
+
+    def test_content_without_filename_raises(self):
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        with pytest.raises(ValueError, match="filename"):
+            ingest_manual_document(content=b"bytes")
+
+    def test_synthetic_url_used_for_file_uploads(self, ingestion_mocks):
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"data", filename="report.pdf")
+
+        call_kwargs = ingestion_mocks["db"].create_document.call_args
+        url_arg = call_kwargs.kwargs.get("url") or call_kwargs.args[0]
+        assert url_arg.startswith("upload://")
+        assert "report.pdf" in url_arg
+
+    def test_real_url_preserved_for_url_ingestion(self, ingestion_mocks):
+        ingestion_mocks["download"].return_value = {
+            "minio_path": "x.html",
+            "file_hash": "c" * 64,
+            "file_size": 1000,
+            "mime_type": "text/html",
+            "doc_type": "html",
+            "content": b"<html>...</html>",
+        }
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        ingest_manual_document(url="https://example.org/doc.html")
+
+        call_kwargs = ingestion_mocks["db"].create_document.call_args
+        url_arg = call_kwargs.kwargs.get("url") or call_kwargs.args[0]
+        assert url_arg == "https://example.org/doc.html"
