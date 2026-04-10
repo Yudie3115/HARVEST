@@ -288,3 +288,70 @@ class TestIngestManualDocument:
         from src.storage.models import DocumentStatus
         assert DocumentStatus.FAILED in statuses
         assert DocumentStatus.PROCESSED not in statuses
+
+
+# ---------------------------------------------------------------------------
+# CLI tests
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    def _run(self, argv: list, mock_ingest_result: dict):
+        with patch("scripts.ingest_document.ingest_manual_document",
+                   return_value=mock_ingest_result) as mock_fn:
+            from scripts.ingest_document import main
+            exit_code = main(argv)
+        return exit_code, mock_fn
+
+    def test_file_flag_reads_file_and_calls_ingest(self, tmp_path):
+        pdf = tmp_path / "guide.pdf"
+        pdf.write_bytes(b"%PDF fake")
+
+        exit_code, mock_fn = self._run(
+            ["--file", str(pdf)],
+            {"status": "processed", "document_id": str(uuid4()),
+             "url": "upload://x/guide.pdf", "chunks": 4, "relevance_score": 8.0},
+        )
+
+        assert exit_code == 0
+        mock_fn.assert_called_once()
+        call_kw = mock_fn.call_args.kwargs
+        assert call_kw["content"] == b"%PDF fake"
+        assert call_kw["filename"] == "guide.pdf"
+
+    def test_url_flag_calls_ingest_with_url(self):
+        exit_code, mock_fn = self._run(
+            ["--url", "https://example.org/doc.pdf"],
+            {"status": "processed", "document_id": str(uuid4()),
+             "url": "https://example.org/doc.pdf", "chunks": 2, "relevance_score": 7.0},
+        )
+
+        assert exit_code == 0
+        mock_fn.assert_called_once()
+        assert mock_fn.call_args.kwargs["url"] == "https://example.org/doc.pdf"
+
+    def test_skipped_low_relevance_exits_nonzero(self):
+        exit_code, _ = self._run(
+            ["--url", "https://example.org/doc.html"],
+            {"status": "skipped", "reason": "low_relevance", "relevance_score": 2.0,
+             "document_id": str(uuid4()), "url": "https://example.org/doc.html", "chunks": 0},
+        )
+        assert exit_code == 1
+
+    def test_no_args_prints_usage_and_exits(self, capsys):
+        with pytest.raises(SystemExit):
+            from scripts.ingest_document import main
+            main([])
+
+    def test_title_and_site_forwarded(self, tmp_path):
+        pdf = tmp_path / "x.pdf"
+        pdf.write_bytes(b"data")
+
+        _, mock_fn = self._run(
+            ["--file", str(pdf), "--title", "My Guide", "--site", "fao"],
+            {"status": "processed", "document_id": str(uuid4()),
+             "url": "upload://x/x.pdf", "chunks": 1, "relevance_score": 7.5},
+        )
+
+        kw = mock_fn.call_args.kwargs
+        assert kw["title"] == "My Guide"
+        assert kw["site_name"] == "fao"
