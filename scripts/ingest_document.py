@@ -15,8 +15,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from src.flows.manual_ingestion import ingest_manual_document
-
 
 def main(argv: list = None) -> int:
     parser = argparse.ArgumentParser(
@@ -46,6 +44,8 @@ def main(argv: list = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    from src.flows.manual_ingestion import ingest_manual_document
 
     if args.file:
         file_path = Path(args.file)

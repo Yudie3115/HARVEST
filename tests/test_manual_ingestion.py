@@ -296,7 +296,7 @@ class TestIngestManualDocument:
 
 class TestCLI:
     def _run(self, argv: list, mock_ingest_result: dict):
-        with patch("scripts.ingest_document.ingest_manual_document",
+        with patch("src.flows.manual_ingestion.ingest_manual_document",
                    return_value=mock_ingest_result) as mock_fn:
             from scripts.ingest_document import main
             exit_code = main(argv)
