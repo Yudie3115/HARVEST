@@ -57,6 +57,31 @@ class PostgresClient:
             logger.info(f"Created crawl run {crawl_run.id} for {site_name}")
             return crawl_run
     
+    def get_or_create_manual_crawl_run(self) -> CrawlRun:
+        """Return the sentinel CrawlRun used for manually uploaded documents.
+
+        Creates it on first call; subsequent calls return the same row.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        with self.get_session() as session:
+            existing = session.query(CrawlRun).filter(
+                CrawlRun.site_name == "manual"
+            ).first()
+            if existing:
+                return existing
+
+            crawl_run = CrawlRun(
+                site_name="manual",
+                status=CrawlStatus.COMPLETED,
+                completed_at=_dt.now(_tz.utc),
+                config={"type": "manual_upload"},
+            )
+            session.add(crawl_run)
+            session.commit()
+            session.refresh(crawl_run)
+            logger.info(f"Created manual upload crawl run {crawl_run.id}")
+            return crawl_run
+
     def update_crawl_run(
         self,
         crawl_run_id: UUID,
@@ -165,6 +190,26 @@ class PostgresClient:
                     document.error_log = error_log
                 session.commit()
     
+    def update_document_file_info(
+        self,
+        document_id: UUID,
+        file_path: str,
+        file_hash: str,
+        file_size_bytes: int,
+        mime_type: str,
+    ) -> None:
+        """Persist MinIO file metadata back to the Document row."""
+        with self.get_session() as session:
+            doc = session.query(Document).filter(
+                Document.id == document_id
+            ).first()
+            if doc:
+                doc.file_path = file_path
+                doc.file_hash = file_hash
+                doc.file_size_bytes = file_size_bytes
+                doc.mime_type = mime_type
+                session.commit()
+
     # Classification methods
     
     def create_classification(
