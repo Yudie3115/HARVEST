@@ -153,12 +153,13 @@ def _semantic_search(query: str, top_k: int = 10) -> List[Dict]:
 
 
 def _answer_question(
-    question: str, top_k: int, score_threshold: float
+    question: str, top_k: int, score_threshold: float, forced_lang: str | None = None
 ) -> tuple[str | None, list, str | None]:
     """Retrieve relevant chunks and synthesise a grounded answer.
 
     Returns (answer, results, detected_lang).
     detected_lang is None when the question is English or translation is disabled.
+    Pass forced_lang to skip auto-detection and use a specific language code.
     """
     from src.config.settings import settings
     from src.translation import TranslationError
@@ -170,13 +171,21 @@ def _answer_question(
 
     # --- Translation: query → English ---
     if translator is not None:
-        detected_lang = translator.detect_language(question)
-        if detected_lang is not None:
+        if forced_lang is not None:
+            detected_lang = forced_lang
             try:
                 english_question = translator.translate_to_english(question, detected_lang)
             except TranslationError as exc:
                 st.warning(f"Could not translate your question — searching in original language. ({exc})")
                 detected_lang = None
+        else:
+            detected_lang = translator.detect_language(question)
+            if detected_lang is not None:
+                try:
+                    english_question = translator.translate_to_english(question, detected_lang)
+                except TranslationError as exc:
+                    st.warning(f"Could not translate your question — searching in original language. ({exc})")
+                    detected_lang = None
 
     results = _semantic_search(english_question, top_k)
     results = [r for r in results if r.get("score", 0) >= score_threshold]
@@ -357,16 +366,32 @@ with tab3:
     )
     top_k = st.slider("Results", min_value=3, max_value=20, value=10)
 
+    from src.config.settings import settings as _s3
+    _forced_search_lang: str | None = None
+    if _s3.translation_enabled:
+        from src.translation import SUPPORTED_LANGUAGES as _s3_langs
+        _local_names_s3 = ", ".join(name for code, name in _s3_langs.items() if code != "eng")
+        _lang_map_s3 = {"Auto-detect": None} | {name: code for code, name in _s3_langs.items() if code != "eng"}
+        _lang_choice_s3 = st.selectbox(
+            "Query language",
+            options=list(_lang_map_s3.keys()),
+            help=f"Supported local languages: {_local_names_s3}",
+            key="search_lang_select",
+        )
+        _forced_search_lang = _lang_map_s3[_lang_choice_s3]
+
     if query:
         with st.spinner("Searching…"):
-            from src.config.settings import settings
             search_query = query
             search_lang: str | None = None
-            if settings.translation_enabled:
+            if _s3.translation_enabled:
                 from src.translation import TranslationError
                 translator = _get_translator()
                 if translator is not None:
-                    search_lang = translator.detect_language(query)
+                    if _forced_search_lang is not None:
+                        search_lang = _forced_search_lang
+                    else:
+                        search_lang = translator.detect_language(query)
                     if search_lang is not None:
                         try:
                             search_query = translator.translate_to_english(query, search_lang)
@@ -376,7 +401,13 @@ with tab3:
         if search_lang is not None:
             from src.translation import SUPPORTED_LANGUAGES
             lang_name = SUPPORTED_LANGUAGES.get(search_lang, search_lang)
-            st.caption(f"Searching in English (translated from {lang_name})")
+            src = "selected" if _forced_search_lang is not None else "auto-detected"
+            st.caption(f"Searching in English (translated from {lang_name}, {src})")
+        elif _s3.translation_enabled and _forced_search_lang is None:
+            st.caption(
+                "Searching as English. "
+                "If your query is in a local language, select it from **Query language** above."
+            )
 
         if results:
             st.write(f"Found **{len(results)}** relevant chunks")
@@ -434,11 +465,27 @@ with tab4:
             help="Chunks below this score are excluded",
         )
 
+    from src.config.settings import settings as _s4
+    _forced_qa_lang: str | None = None
+    if _s4.translation_enabled:
+        from src.translation import SUPPORTED_LANGUAGES as _s4_langs
+        _local_names_s4 = ", ".join(name for code, name in _s4_langs.items() if code != "eng")
+        _lang_map_s4 = {"Auto-detect": None} | {name: code for code, name in _s4_langs.items() if code != "eng"}
+        _lang_choice_s4 = st.selectbox(
+            "Question language",
+            options=list(_lang_map_s4.keys()),
+            help=f"Supported local languages: {_local_names_s4}",
+            key="qa_lang_select",
+        )
+        _forced_qa_lang = _lang_map_s4[_lang_choice_s4]
+
     ask_clicked = st.button("Ask the Knowledge Base", type="primary")
 
     if ask_clicked and question.strip():
         with st.spinner("Searching knowledge base and generating answer…"):
-            answer, results, detected_lang = _answer_question(question.strip(), qa_top_k, qa_threshold)
+            answer, results, detected_lang = _answer_question(
+                question.strip(), qa_top_k, qa_threshold, forced_lang=_forced_qa_lang
+            )
 
         if answer is None and not results:
             st.warning(
@@ -452,7 +499,13 @@ with tab4:
             if detected_lang is not None:
                 from src.translation import SUPPORTED_LANGUAGES
                 lang_name = SUPPORTED_LANGUAGES.get(detected_lang, detected_lang)
-                st.caption(f"Detected: {lang_name} — answering in {lang_name}")
+                src = "selected" if _forced_qa_lang is not None else "auto-detected"
+                st.caption(f"{lang_name} {src} — answering in {lang_name}")
+            elif _s4.translation_enabled and _forced_qa_lang is None:
+                st.caption(
+                    "Answering in English. "
+                    "If your question is in a local language, select it from **Question language** above."
+                )
             st.markdown("**Answer:**")
             st.info(answer)
 
