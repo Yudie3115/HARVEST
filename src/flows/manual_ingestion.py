@@ -128,6 +128,7 @@ def ingest_manual_document(
             file_size_bytes=download_result["file_size"],
             mime_type=download_result["mime_type"],
         )
+        db.update_document_status(UUID(doc_id), DocumentStatus.PROCESSING)
 
     # --- Extract text ---
     text = extract_content(download_result, url=source_url)
@@ -177,9 +178,23 @@ def ingest_manual_document(
     db.create_classification(UUID(doc_id), classification)
 
     # --- Chunk, embed, and store ---
-    chunks = chunk_and_embed(text, doc_id, classification, url=source_url)
-    stored = store_chunks(chunks, doc_id, classification)
-    db.update_document_status(UUID(doc_id), DocumentStatus.PROCESSED)
+    try:
+        chunks = chunk_and_embed(text, doc_id, classification, url=source_url)
+        stored = store_chunks(chunks, doc_id, classification)
+        db.update_document_status(UUID(doc_id), DocumentStatus.PROCESSED)
+    except Exception as exc:
+        db.update_document_status(
+            UUID(doc_id),
+            DocumentStatus.FAILED,
+            error_log=str(exc),
+        )
+        logger.error(f"Manual ingestion failed during chunk/store for {source_url}: {exc}")
+        return {
+            "document_id": doc_id,
+            "url": source_url,
+            "status": "failed",
+            "chunks": 0,
+        }
 
     summary = {
         "document_id": doc_id,

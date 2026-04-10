@@ -272,3 +272,19 @@ class TestIngestManualDocument:
         call_kwargs = ingestion_mocks["db"].create_document.call_args
         url_arg = call_kwargs.kwargs.get("url") or call_kwargs.args[0]
         assert url_arg == "https://example.org/doc.html"
+
+    def test_chunk_embed_exception_sets_failed_status(self, ingestion_mocks):
+        ingestion_mocks["chunk"].side_effect = RuntimeError("Qdrant unreachable")
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"some content", filename="guide.pdf")
+
+        assert result["status"] == "failed"
+        assert result["chunks"] == 0
+        # Status must be set to FAILED (not left as PROCESSING)
+        status_calls = ingestion_mocks["db"].update_document_status.call_args_list
+        statuses = [call.args[1] for call in status_calls]
+        from src.storage.models import DocumentStatus
+        assert DocumentStatus.FAILED in statuses
+        assert DocumentStatus.PROCESSED not in statuses
