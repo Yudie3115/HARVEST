@@ -128,6 +128,7 @@ def ingest_manual_document(
             file_size_bytes=download_result["file_size"],
             mime_type=download_result["mime_type"],
         )
+        # download_document() internally sets status=QUEUED on success; reset to PROCESSING.
         db.update_document_status(UUID(doc_id), DocumentStatus.PROCESSING)
 
     # --- Extract text ---

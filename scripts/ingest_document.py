@@ -68,10 +68,12 @@ def main(argv: list = None) -> int:
 
     status = result.get("status")
     if status == "processed":
+        score = result.get("relevance_score")
+        score_str = f"{score:.1f}" if isinstance(score, (int, float)) else "N/A"
         print(
             f"✓ Processed  |  "
             f"chunks={result['chunks']}  "
-            f"relevance={result.get('relevance_score', 'N/A'):.1f}  "
+            f"relevance={score_str}  "
             f"id={result['document_id']}"
         )
         return 0

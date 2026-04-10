@@ -1,6 +1,7 @@
 """
 PostgreSQL database client
 """
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from uuid import UUID
 from sqlalchemy import create_engine
@@ -62,18 +63,18 @@ class PostgresClient:
 
         Creates it on first call; subsequent calls return the same row.
         """
-        from datetime import datetime as _dt, timezone as _tz
         with self.get_session() as session:
             existing = session.query(CrawlRun).filter(
                 CrawlRun.site_name == "manual"
             ).first()
             if existing:
+                session.refresh(existing)
                 return existing
 
             crawl_run = CrawlRun(
                 site_name="manual",
                 status=CrawlStatus.COMPLETED,
-                completed_at=_dt.now(_tz.utc),
+                completed_at=datetime.now(timezone.utc),
                 config={"type": "manual_upload"},
             )
             session.add(crawl_run)

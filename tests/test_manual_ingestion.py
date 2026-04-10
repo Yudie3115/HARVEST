@@ -289,6 +289,17 @@ class TestIngestManualDocument:
         assert DocumentStatus.FAILED in statuses
         assert DocumentStatus.PROCESSED not in statuses
 
+    def test_download_failure_returns_failed(self, ingestion_mocks):
+        ingestion_mocks["download"].return_value = None
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(url="https://example.org/doc.pdf")
+
+        assert result["status"] == "failed"
+        assert result["chunks"] == 0
+        ingestion_mocks["extract"].assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # CLI tests
@@ -355,3 +366,11 @@ class TestCLI:
         kw = mock_fn.call_args.kwargs
         assert kw["title"] == "My Guide"
         assert kw["site_name"] == "fao"
+
+    def test_nonexistent_file_exits_nonzero(self):
+        exit_code, mock_fn = self._run(
+            ["--file", "/tmp/does_not_exist_abc123.pdf"],
+            {},  # ingest_manual_document should not be called
+        )
+        assert exit_code == 1
+        mock_fn.assert_not_called()
