@@ -51,7 +51,8 @@ post-harvest-knowledge-scraper/
 │   │   ├── __init__.py
 │   │   ├── discovery.py                # Discovery pipeline ✓
 │   │   ├── processing.py               # Processing pipeline ✓
-│   │   └── orchestration.py            # Main orchestration ✓
+│   │   ├── orchestration.py            # Main orchestration ✓
+│   │   └── manual_ingestion.py         # Manual document ingestion (file/URL) ✓
 │   │
 │   └── utils/                          # Utility functions ✓
 │       ├── __init__.py
@@ -60,17 +61,19 @@ post-harvest-knowledge-scraper/
 │       └── text_processing.py          # Chunking, cleaning ✓
 │
 ├── dashboard/                          # Streamlit dashboard ✓
-│   └── app.py                          # Overview, Documents, Search, Q&A, Config tabs ✓
+│   └── app.py                          # Overview, Documents, Search, Q&A, Config, Add Document tabs ✓
 │
 ├── scripts/                            # Admin and setup scripts
 │   ├── init_db.py                      # Database initialization ✓
 │   ├── deploy_flows.py                 # Deploy Prefect workflows ✓
-│   └── smoke_test.py                   # End-to-end feature smoke test ✓
+│   ├── smoke_test.py                   # End-to-end feature smoke test ✓
+│   └── ingest_document.py              # CLI: manually add a file or URL ✓
 │
-├── tests/                              # Test suite (110 tests) ✓
+├── tests/                              # Test suite (107 tests) ✓
 │   ├── __init__.py
 │   ├── test_extractors.py              # HTML, PDF, VTT extraction ✓
 │   ├── test_llm.py                     # LLM client, classification, embeddings ✓
+│   ├── test_manual_ingestion.py        # Manual ingestion, CLI (all services mocked) ✓
 │   ├── test_storage.py                 # VectorDBClient, PostgresClient ✓
 │   ├── test_translation_client.py      # TranslationClient (all HTTP mocked) ✓
 │   └── test_utils.py                   # Hashing, text processing, chunking ✓
@@ -124,15 +127,25 @@ post-harvest-knowledge-scraper/
 - ✅ Bidirectional translation (query → English → answer → local language)
 - ✅ Graceful degradation (always falls back to English on failure)
 
+### Manual Ingestion
+- ✅ `ingest_manual_document()` — bypass crawl pipeline for a single file or URL
+- ✅ LLM relevance gate applied (same threshold as the crawl pipeline)
+- ✅ File upload path: PDF, DOCX, HTML; MIME detection via stdlib `mimetypes`
+- ✅ URL path: delegates download to existing `download_document` task
+- ✅ Classification stored even for rejected documents (audit trail)
+- ✅ CLI: `scripts/ingest_document.py` with `--file` / `--url` / `--title` / `--site`
+- ✅ Dashboard: "Add Document" tab with file uploader and URL input
+
 ### Dashboard
 - ✅ Overview: document counts, processing rate, crawl activity chart
 - ✅ Documents: filterable document browser with DB integration
 - ✅ Search: semantic search with translation support
 - ✅ Knowledge Base Q&A: RAG with translation support
 - ✅ Configuration: LLM/crawl settings, connection health checker
+- ✅ Add Document: manual file upload and URL ingestion with LLM relevance feedback
 
 ### Testing
-- ✅ 110 unit tests across all modules (no live services required)
+- ✅ 107 unit tests across all modules (no live services required)
 
 ## 🔧 File Descriptions
 
@@ -200,6 +213,11 @@ post-harvest-knowledge-scraper/
 **src/flows/discovery.py** / **processing.py** / **orchestration.py**
 - Prefect flows: daily full crawl, hourly incremental, weekly retry
 
+**src/flows/manual_ingestion.py**
+- `ingest_manual_document()`: accepts `content+filename` (file upload) or `url` (remote download)
+- Uses sentinel `CrawlRun(site_name="manual")` as the FK anchor for all manual uploads
+- Applies LLM relevance gate; documents below threshold are SKIPPED with classification stored
+
 ### Dashboard
 
 **dashboard/app.py**
@@ -212,6 +230,7 @@ post-harvest-knowledge-scraper/
 **scripts/init_db.py** — creates database tables and indexes
 **scripts/deploy_flows.py** — deploys Prefect flows with schedules
 **scripts/smoke_test.py** — end-to-end feature verification (6 sections, ~11 checks)
+**scripts/ingest_document.py** — CLI for manually ingesting a file or URL (`--file`, `--url`, `--title`, `--site`)
 
 ## 🚀 Getting Started
 

@@ -194,7 +194,7 @@ poetry run pytest tests/ -v
 
 Expected output:
 ```
-110 passed in ~3s
+107 passed in ~3s
 ```
 
 Test coverage by module:
@@ -206,6 +206,7 @@ Test coverage by module:
 | `tests/test_llm.py` | URL classification, content classification, prompt builders, embeddings |
 | `tests/test_storage.py` | VectorDBClient (Qdrant), PostgresClient – all with mocks |
 | `tests/test_translation_client.py` | TranslationClient: translate, detect_language, check_connection, retry logic, text chunking – all with mocked HTTP |
+| `tests/test_manual_ingestion.py` | PostgresClient helpers, `ingest_manual_document` (file + URL paths, relevance gate, exception handling), CLI flags and exit codes – all with mocks |
 
 Run a single test file:
 
@@ -407,6 +408,7 @@ Tabs available:
 | Search | Semantic search across processed chunks in Qdrant; auto-translates queries from local Ugandan languages |
 | Knowledge Base Q&A | Ask questions in English or a local Ugandan language; get grounded answers translated back to your language |
 | Configuration | LLM/crawl settings, service connection health checker (PostgreSQL, MinIO, Qdrant, LLM, Prefect, Sunbird AI) |
+| Add Document | Manually add a PDF, Word document, or HTML page by file upload or URL; LLM relevance check applied automatically |
 
 ---
 
@@ -458,6 +460,38 @@ NEW_SITE_ENABLED=true
 ```bash
 poetry run python -c "from src.flows.discovery import discover_content; discover_content('new_site')"
 ```
+
+### Add a document manually
+
+Bypass the crawl pipeline and ingest a single file or URL directly. The full LLM
+classification and relevance check still apply — documents that score below the
+threshold are rejected and will not appear in search results.
+
+**From the dashboard** — open the **Add Document** tab, choose "Upload File" or
+"From URL", optionally set a title and source label, then click the button.
+
+**From the CLI:**
+
+```bash
+# Add a local PDF
+poetry run python -m scripts.ingest_document --file /path/to/report.pdf
+
+# Add a local file with a title and source label
+poetry run python -m scripts.ingest_document \
+  --file /path/to/guide.pdf \
+  --title "Maize Drying Best Practices" \
+  --site fao
+
+# Download and ingest a remote document
+poetry run python -m scripts.ingest_document --url https://example.org/guide.pdf
+```
+
+Exit codes: `0` = processed successfully, `1` = rejected (low relevance / no
+content) or failed.
+
+The ingested document is stored with `site_name = "manual"` (or whatever you
+pass with `--site`) and is immediately searchable in the dashboard and via the
+Q&A tab.
 
 ### Reprocess failed documents
 
