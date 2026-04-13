@@ -1,7 +1,7 @@
 """
 Prompt templates for LLM operations
 """
-from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES
+from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_CROPS
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ Document excerpt:
 Extract the following information:
 
 1. primary_topics: Main topics from this list - {topics}
-2. crops_mentioned: Specific crops mentioned (maize, beans, coffee, cassava, sweet potato, rice, banana, etc.)
+2. crops_mentioned: Specific crops mentioned from this list - {crops}
 3. regions: Geographic areas mentioned (Ugandan districts or regions)
 4. document_type: Category from {document_types}
 5. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
@@ -85,6 +85,7 @@ def build_content_classification_prompt(content: str, url: str = "") -> str:
         content=content,
         topics=POST_HARVEST_TOPICS,
         document_types=DOCUMENT_TYPES,
+        crops=TARGET_CROPS,
     )
 
 

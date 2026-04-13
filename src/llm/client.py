@@ -7,7 +7,7 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.config.settings import settings
-from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES
+from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_CROPS
 
 
 class LLMClient:
@@ -219,7 +219,7 @@ Document excerpt:
 Extract the following information:
 
 1. primary_topics: Main topics from this list - {POST_HARVEST_TOPICS}
-2. crops_mentioned: Specific crops mentioned (maize, beans, coffee, cassava, sweet potato, rice, banana, etc.)
+2. crops_mentioned: Specific crops mentioned from this list - {TARGET_CROPS}
 3. regions: Geographic areas mentioned (Ugandan districts or regions)
 4. document_type: Category from {DOCUMENT_TYPES}
 5. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
