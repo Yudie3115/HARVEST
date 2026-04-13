@@ -1,4 +1,7 @@
-# Post-Harvest Knowledge Scraper: Architecture & Implementation
+# Post-Harvest Knowledge Scraper: Scraper Architecture (Legacy Reference)
+
+> **Note:** This document covers the scraper and knowledge pipeline internals only.
+> For the full system architecture including the chatbot API and frontend, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## System Overview
 

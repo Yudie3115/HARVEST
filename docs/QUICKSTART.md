@@ -1,22 +1,22 @@
-# Post-Harvest Knowledge Scraper – Quick Start Guide
+# Quick Start Guide
 
 ## Prerequisites
 
-- **Python 3.11+**
+- **Python 3.11+** and **Poetry**
+- **Node.js 20+** and **npm** (for the chatbot frontend)
 - **Docker & Docker Compose**
 - **Git**
-- **OpenAI API Key** (recommended) OR
-- **16 GB RAM minimum** (if using Ollama locally)
+- **OpenAI API Key** (recommended) OR **16 GB RAM** (if using Ollama locally)
 - **100 GB+ disk space** for documents and vector database
 
 Optional:
-- **NVIDIA GPU** with 8 GB+ VRAM (only if using Ollama – significantly speeds up LLM inference)
+- **NVIDIA GPU** with 8 GB+ VRAM (only if using Ollama — significantly speeds up LLM inference)
 
 ---
 
 ## Installation
 
-### 1. Clone and set up
+### 1. Clone and install dependencies
 
 ```bash
 git clone <repo-url>
@@ -25,14 +25,17 @@ cd post-harvest-knowledge-scraper
 # Install Poetry (if not already installed)
 curl -sSL https://install.python-poetry.org | python3 -
 
-# Install all dependencies
+# Install Python dependencies
 poetry install
+
+# Install frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
 ### 2. Start infrastructure
 
 ```bash
-# Start all services (PostgreSQL, MinIO, Qdrant, Prefect)
+# Start all services (PostgreSQL on 5433, MinIO, Qdrant, Prefect, API, Frontend)
 docker compose up -d
 
 # Check that services are healthy
@@ -42,12 +45,16 @@ docker compose ps
 Expected output:
 
 ```
-NAME                     STATUS
-postharvest-postgres     Up (healthy)
-postharvest-minio        Up (healthy)
-postharvest-qdrant       Up
-postharvest-prefect      Up
+NAME                      STATUS
+postharvest-postgres      Up (healthy)
+postharvest-minio         Up (healthy)
+postharvest-qdrant        Up
+postharvest-prefect       Up
+postharvest-api           Up
+postharvest-frontend      Up
 ```
+
+> PostgreSQL runs on host port **5433** (not 5432) so it can coexist with any local PostgreSQL instance.
 
 > Ollama is optional. Uncomment the Ollama service in `docker-compose.yml` if you
 > prefer a fully local, zero-cost LLM setup.
@@ -93,6 +100,64 @@ Expected output:
 ✓ Connected to PostgreSQL
 ✓ Created tables: crawl_runs, documents, document_classifications, ...
 ✓ Database initialized successfully
+```
+
+---
+
+## Running the chatbot
+
+### Chatbot API (FastAPI)
+
+```bash
+# Development — auto-reloads on file changes
+poetry run uvicorn src.api.main:app --reload --port 8000
+
+# Verify it's up
+curl http://localhost:8000/health
+# {"status":"ok","version":"1.0.0"}
+```
+
+Key endpoints:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/session/new` | Start a new chat session |
+| `POST` | `/chat` | Send a message, get an answer |
+| `GET` | `/session/{id}/history` | Retrieve message history |
+| `GET/POST` | `/webhook/whatsapp` | WhatsApp webhook (Meta Cloud API) |
+
+### Chatbot frontend (React)
+
+```bash
+cd frontend
+npm run dev
+# Open http://localhost:5173
+```
+
+The frontend reads `VITE_API_URL` from the environment. It defaults to `http://localhost:8000` if not set.
+
+To point it at a different API:
+
+```bash
+VITE_API_URL=http://localhost:8000 npm run dev
+```
+
+### Running both without Docker
+
+If you prefer running the API and frontend outside Docker during development:
+
+```bash
+# Terminal 1 — infrastructure only
+docker compose up -d postgres qdrant minio prefect-server
+
+# Terminal 2 — API
+poetry run uvicorn src.api.main:app --reload --port 8000
+
+# Terminal 3 — frontend
+cd frontend && npm run dev
+
+# Terminal 4 — admin dashboard (optional)
+poetry run streamlit run dashboard/app.py
 ```
 
 ---
@@ -629,21 +694,27 @@ CRAWL_MAX_DEPTH=2
 ```bash
 # Setup from scratch
 make setup
+cd frontend && npm install && cd ..
 
 # Run tests
 make test
 
-# Full pipeline
+# Start everything (infrastructure + API + frontend)
+docker compose up -d
+
+# Or run services manually
+poetry run uvicorn src.api.main:app --reload --port 8000
+cd frontend && npm run dev
+poetry run streamlit run dashboard/app.py
+
+# Full scraper pipeline
 poetry run python -c "from src.flows.orchestration import main_scraper_flow; main_scraper_flow()"
 
-# Deploy to Prefect
+# Deploy flows to Prefect
 poetry run python scripts/deploy_flows.py
 
 # Start scheduled worker
 poetry run prefect worker start --pool postharvest-pool
-
-# View deployments
-poetry run prefect deployment ls
 
 # Reset database
 docker compose down -v
@@ -653,4 +724,10 @@ poetry run python scripts/init_db.py
 
 ---
 
-Enjoy building your post-harvest knowledge base! 🌾
+## Production deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the full guide to deploying on Dokku/DigitalOcean, configuring SSL, and setting up WhatsApp.
+
+---
+
+*Enjoy building your post-harvest knowledge base!* 🌾

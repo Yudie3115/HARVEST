@@ -1,251 +1,181 @@
-# Post-Harvest Knowledge Scraper - Project Structure
+# Project Structure
 
-## 📁 Complete File Tree
+## File tree
 
 ```
 post-harvest-knowledge-scraper/
-├── .env.example                        # Environment configuration template
-├── .gitignore
-├── pyproject.toml                      # Poetry dependencies
-├── docker-compose.yml                  # Infrastructure services
-├── Makefile                            # Convenience commands
 │
-├── src/                                # Main application code
-│   ├── __init__.py
+├── docker-compose.yml              # All services (local dev)
+├── pyproject.toml                  # Python dependencies (Poetry)
+├── Makefile                        # Convenience commands
+├── .env.example                    # Environment variable template
+│
+├── src/                            # Python source
+│   ├── api/                        # Public chatbot API (FastAPI)
+│   │   ├── main.py                 # App factory, CORS, rate limiter, lifespan
+│   │   ├── dependencies.py         # FastAPI Depends() injectables
+│   │   ├── routes/
+│   │   │   ├── chat.py             # POST /chat
+│   │   │   ├── session.py          # POST /session/new, GET /session/{id}/history
+│   │   │   ├── whatsapp.py         # GET/POST /webhook/whatsapp
+│   │   │   └── health.py           # GET /health
+│   │   ├── services/
+│   │   │   ├── chat_service.py     # RAG pipeline orchestration
+│   │   │   └── whatsapp_service.py # Meta Cloud API reply client
+│   │   └── models/
+│   │       ├── requests.py         # Pydantic request schemas
+│   │       └── responses.py        # Pydantic response schemas
 │   │
-│   ├── config/                         # Configuration
-│   │   ├── __init__.py
-│   │   ├── settings.py                 # Pydantic settings (all env vars) ✓
-│   │   └── site_configs.py             # Site-specific crawl configs ✓
+│   ├── config/                     # Configuration
+│   │   ├── settings.py             # Pydantic settings (all env vars)
+│   │   └── site_configs.py         # Site-specific crawl configs
 │   │
-│   ├── crawlers/                       # Web crawling (stubs)
-│   │   ├── __init__.py
+│   ├── crawlers/                   # Web crawling
 │   │   ├── base.py
 │   │   ├── playwright_crawler.py
 │   │   └── scrapy_crawler.py
 │   │
-│   ├── extractors/                     # Content extraction ✓
-│   │   ├── __init__.py
-│   │   ├── pdf_extractor.py            # PDF text/table extraction ✓
-│   │   ├── html_extractor.py           # HTML content extraction ✓
-│   │   └── video_extractor.py          # Video metadata extraction ✓
+│   ├── extractors/                 # Content extraction
+│   │   ├── pdf_extractor.py        # PDF text and table extraction
+│   │   ├── html_extractor.py       # HTML content extraction
+│   │   └── video_extractor.py      # Video metadata extraction
 │   │
-│   ├── llm/                            # LLM integration ✓
-│   │   ├── __init__.py
-│   │   ├── client.py                   # Unified OpenAI/Ollama client ✓
-│   │   ├── prompts.py                  # Prompt templates ✓
-│   │   └── embeddings.py               # Embedding generation ✓
+│   ├── llm/                        # LLM integration
+│   │   ├── client.py               # Unified OpenAI/Ollama client
+│   │   ├── prompts.py              # Prompt templates
+│   │   └── embeddings.py           # Embedding generation
 │   │
-│   ├── storage/                        # Data persistence ✓
-│   │   ├── __init__.py
-│   │   ├── models.py                   # SQLAlchemy models ✓
-│   │   ├── postgres.py                 # PostgreSQL client ✓
-│   │   ├── minio_client.py             # MinIO object storage ✓
-│   │   └── vector_db.py                # Qdrant vector database ✓
+│   ├── storage/                    # Data persistence
+│   │   ├── models.py               # SQLAlchemy ORM models (all tables)
+│   │   ├── postgres.py             # PostgreSQL client
+│   │   ├── minio_client.py         # MinIO object storage
+│   │   └── vector_db.py            # Qdrant vector database
 │   │
-│   ├── translation/                    # Sunbird AI translation ✓
-│   │   ├── __init__.py                 # Exports TranslationClient, TranslationError, SUPPORTED_LANGUAGES ✓
-│   │   └── client.py                   # Sunbird API: translate, detect_language, check_connection ✓
+│   ├── translation/                # Sunbird AI translation
+│   │   ├── __init__.py             # Exports TranslationClient, SUPPORTED_LANGUAGES
+│   │   └── client.py               # translate, detect_language, check_connection
 │   │
-│   ├── flows/                          # Prefect workflows ✓
-│   │   ├── __init__.py
-│   │   ├── discovery.py                # Discovery pipeline ✓
-│   │   ├── processing.py               # Processing pipeline ✓
-│   │   ├── orchestration.py            # Main orchestration ✓
-│   │   └── manual_ingestion.py         # Manual document ingestion (file/URL) ✓
+│   ├── flows/                      # Prefect workflows
+│   │   ├── discovery.py            # URL discovery and classification
+│   │   ├── processing.py           # Document download, extract, embed
+│   │   ├── orchestration.py        # Main orchestration flow
+│   │   └── manual_ingestion.py     # Manual document ingestion (file/URL)
 │   │
-│   └── utils/                          # Utility functions ✓
-│       ├── __init__.py
-│       ├── logging.py                  # Loguru configuration ✓
-│       ├── hashing.py                  # SHA-256 file hashing ✓
-│       └── text_processing.py          # Chunking, cleaning ✓
+│   └── utils/                      # Utilities
+│       ├── logging.py              # Loguru configuration
+│       ├── hashing.py              # SHA-256 file hashing
+│       └── text_processing.py      # Chunking, cleaning
 │
-├── dashboard/                          # Streamlit dashboard ✓
-│   └── app.py                          # Overview, Documents, Search, Q&A, Config, Add Document tabs ✓
+├── frontend/                       # React SPA (chatbot UI)
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   ├── index.css               # Tailwind + custom animations
+│   │   ├── api.js                  # fetch wrapper for FastAPI
+│   │   ├── components/
+│   │   │   ├── Header.jsx          # Logo + language picker
+│   │   │   ├── ChatWindow.jsx      # Scrollable message list
+│   │   │   ├── MessageBubble.jsx   # User / assistant bubbles
+│   │   │   ├── SourceChips.jsx     # Citation chips
+│   │   │   ├── LanguageBar.jsx     # Language status strip
+│   │   │   ├── InputBar.jsx        # Expanding textarea + send button
+│   │   │   └── TypingIndicator.jsx # Three-dot loading animation
+│   │   └── hooks/
+│   │       ├── useSession.js       # Session creation / localStorage
+│   │       └── useChat.js          # Message state, API calls
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   └── postcss.config.js
 │
-├── scripts/                            # Admin and setup scripts
-│   ├── init_db.py                      # Database initialization ✓
-│   ├── deploy_flows.py                 # Deploy Prefect workflows ✓
-│   ├── smoke_test.py                   # End-to-end feature smoke test ✓
-│   └── ingest_document.py              # CLI: manually add a file or URL ✓
+├── dashboard/                      # Streamlit admin dashboard (internal only)
+│   └── app.py                      # 6 tabs: Overview, Documents, Search, Q&A, Config, Add Document
 │
-├── tests/                              # Test suite (107 tests) ✓
-│   ├── __init__.py
-│   ├── test_extractors.py              # HTML, PDF, VTT extraction ✓
-│   ├── test_llm.py                     # LLM client, classification, embeddings ✓
-│   ├── test_manual_ingestion.py        # Manual ingestion, CLI (all services mocked) ✓
-│   ├── test_storage.py                 # VectorDBClient, PostgresClient ✓
-│   ├── test_translation_client.py      # TranslationClient (all HTTP mocked) ✓
-│   └── test_utils.py                   # Hashing, text processing, chunking ✓
+├── docker/                         # Production Dockerfiles
+│   ├── api.Dockerfile              # python:3.12-slim → uvicorn
+│   ├── frontend.Dockerfile         # node:20 build → nginx:alpine serve
+│   └── nginx.frontend.conf         # nginx config (SPA fallback + gzip)
 │
-├── docs/                               # Documentation
-│   ├── QUICKSTART.md                   # Setup and usage guide ✓
-│   ├── PROJECT_STRUCTURE.md            # This file ✓
-│   ├── postharvest_scraper_architecture.md  # Architecture overview ✓
-│   └── superpowers/                    # Design specs and implementation plans
-│       ├── specs/
-│       └── plans/
+├── scripts/                        # Admin and setup scripts
+│   ├── init_db.py                  # Create/migrate database tables
+│   ├── deploy_flows.py             # Deploy Prefect workflows with schedules
+│   ├── smoke_test.py               # End-to-end feature verification
+│   └── ingest_document.py          # CLI: manually add a file or URL
 │
-└── logs/                               # Application logs (created at runtime)
-    └── scraper.log
-```
-
-## ✅ Implementation Status
-
-### Core Infrastructure
-- ✅ Docker Compose setup (PostgreSQL, MinIO, Qdrant, Prefect)
-- ✅ Environment configuration (Pydantic settings)
-- ✅ Database models (SQLAlchemy)
-- ✅ PostgreSQL client
-- ✅ MinIO client
-- ✅ Database initialization script
-
-### LLM Integration
-- ✅ Unified LLM client (OpenAI + Ollama with auto-detection)
-- ✅ URL classification
-- ✅ Content classification
-- ✅ Prompt templates
-- ✅ Embedding generation (OpenAI text-embedding-3-small / sentence-transformers fallback)
-
-### Discovery Pipeline
-- ✅ Crawling logic
-- ✅ LLM-powered URL filtering
-- ✅ Document metadata extraction
-- ✅ Prefect flow structure
-
-### Processing Pipeline
-- ✅ HTML content extraction (Trafilatura)
-- ✅ PDF extraction (PyMuPDF + pdfplumber)
-- ✅ Video metadata extraction (yt-dlp)
-- ✅ Text chunking
-- ✅ Qdrant vector database integration
-- ✅ End-to-end processing flow
-
-### Translation
-- ✅ Sunbird AI integration (Luganda, Acholi, Runyankole, Ateso, Lugbara)
-- ✅ Automatic language detection
-- ✅ Bidirectional translation (query → English → answer → local language)
-- ✅ Graceful degradation (always falls back to English on failure)
-
-### Manual Ingestion
-- ✅ `ingest_manual_document()` — bypass crawl pipeline for a single file or URL
-- ✅ LLM relevance gate applied (same threshold as the crawl pipeline)
-- ✅ File upload path: PDF, DOCX, HTML; MIME detection via stdlib `mimetypes`
-- ✅ URL path: delegates download to existing `download_document` task
-- ✅ Classification stored even for rejected documents (audit trail)
-- ✅ CLI: `scripts/ingest_document.py` with `--file` / `--url` / `--title` / `--site`
-- ✅ Dashboard: "Add Document" tab with file uploader and URL input
-
-### Dashboard
-- ✅ Overview: document counts, processing rate, crawl activity chart
-- ✅ Documents: filterable document browser with DB integration
-- ✅ Search: semantic search with translation support
-- ✅ Knowledge Base Q&A: RAG with translation support
-- ✅ Configuration: LLM/crawl settings, connection health checker
-- ✅ Add Document: manual file upload and URL ingestion with LLM relevance feedback
-
-### Testing
-- ✅ 107 unit tests across all modules (no live services required)
-
-## 🔧 File Descriptions
-
-### Configuration Files
-
-**pyproject.toml**
-- Poetry dependency management
-- Python package metadata
-- Development tool configuration
-
-**.env.example**
-- Environment variable template
-- Database credentials
-- API keys
-- Service URLs
-
-**docker-compose.yml**
-- PostgreSQL database
-- MinIO object storage
-- Qdrant vector database
-- Prefect server
-- (Optional) Ollama LLM service
-
-### Core Modules
-
-**src/config/settings.py**
-- Pydantic settings model
-- Environment variable loading for all services (DB, LLM, MinIO, Qdrant, Prefect, Sunbird AI)
-
-**src/config/site_configs.py**
-- Site-specific crawl strategies for NARO, MoA, Extension, UBOS
-- URL patterns, rate limits, and keyword filters
-
-**src/llm/client.py**
-- Unified LLM interface (OpenAI + Ollama)
-- Automatic provider selection based on available API key
-- URL classification and content classification
-
-**src/llm/embeddings.py**
-- Embedding generation (OpenAI text-embedding-3-small / sentence-transformers fallback)
-- Batch embedding support
-
-**src/storage/models.py**
-- SQLAlchemy ORM models (documents, crawl_runs, classifications, processing_queue)
-
-**src/storage/postgres.py**
-- Document CRUD, crawl statistics, status queries
-
-**src/storage/minio_client.py**
-- Object storage for raw documents (PDFs, HTML snapshots)
-
-**src/storage/vector_db.py**
-- Qdrant client: upsert, search, collection management
-
-**src/translation/client.py**
-- Sunbird AI REST API client
-- `translate()`: single or chunked translation with retry (429/503/504)
-- `detect_language()`: confidence-threshold language detection
-- `check_connection()`: connectivity probe for the status dashboard
-
-**src/translation/__init__.py**
-- Public exports: `TranslationClient`, `TranslationError`, `SUPPORTED_LANGUAGES`
-- Supported codes: `eng`, `lug`, `ach`, `nyn`, `teo`, `lgg`
-
-**src/flows/discovery.py** / **processing.py** / **orchestration.py**
-- Prefect flows: daily full crawl, hourly incremental, weekly retry
-
-**src/flows/manual_ingestion.py**
-- `ingest_manual_document()`: accepts `content+filename` (file upload) or `url` (remote download)
-- Uses sentinel `CrawlRun(site_name="manual")` as the FK anchor for all manual uploads
-- Applies LLM relevance gate; documents below threshold are SKIPPED with classification stored
-
-### Dashboard
-
-**dashboard/app.py**
-- Overview, Documents, Search, Knowledge Base Q&A, Configuration tabs
-- Translation pre/post-processing in Search and Q&A tabs
-- `_get_translator()` cached resource; graceful degradation on Sunbird failures
-
-### Scripts
-
-**scripts/init_db.py** — creates database tables and indexes
-**scripts/deploy_flows.py** — deploys Prefect flows with schedules
-**scripts/smoke_test.py** — end-to-end feature verification (6 sections, ~11 checks)
-**scripts/ingest_document.py** — CLI for manually ingesting a file or URL (`--file`, `--url`, `--title`, `--site`)
-
-## 🚀 Getting Started
-
-See `docs/QUICKSTART.md` for the full setup guide.
-
-```bash
-git clone <repo-url>
-cd post-harvest-knowledge-scraper
-poetry install
-docker compose up -d
-poetry run python scripts/init_db.py
-poetry run streamlit run dashboard/app.py
+├── tests/                          # Test suite
+│   ├── test_extractors.py
+│   ├── test_llm.py
+│   ├── test_manual_ingestion.py
+│   ├── test_storage.py
+│   ├── test_translation_client.py
+│   └── test_utils.py
+│
+└── docs/                           # Documentation
+    ├── QUICKSTART.md               # Local development setup
+    ├── DEPLOYMENT.md               # Production deployment (Dokku/DigitalOcean)
+    ├── ARCHITECTURE.md             # System design and component overview
+    ├── PROJECT_STRUCTURE.md        # This file
+    └── postharvest_scraper_architecture.md  # Legacy deep-dive (scraper internals)
 ```
 
 ---
 
-**Legend:**
-- ✅ = Fully implemented and tested
+## Key modules
+
+### `src/api/` — Public chatbot API
+
+FastAPI application that wraps the RAG pipeline for external consumption. Handles web and WhatsApp channels, rate limiting, session management, and the full translate → embed → search → synthesise → translate cycle.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the request flow.
+
+### `src/config/settings.py`
+
+Single source of truth for all configuration. Pydantic Settings model reads from `.env`. Adding a new setting: add a `Field()` here and a matching entry in `.env.example`.
+
+### `src/storage/models.py`
+
+All SQLAlchemy ORM models in one file. Knowledge pipeline tables (`crawl_runs`, `documents`, `document_classifications`, `content_chunks`) and chatbot tables (`chat_sessions`, `chat_messages`).
+
+### `src/llm/client.py`
+
+Unified LLM interface. Automatically selects OpenAI if `OPENAI_API_KEY` is set, falls back to Ollama. Used by the classification pipeline and the chat service.
+
+### `src/translation/client.py`
+
+Sunbird AI REST client. Handles chunking for long texts, exponential backoff on rate limits, and graceful fallback to English when the service is unavailable.
+
+### `src/flows/`
+
+Prefect workflows for the scraping pipeline. `discovery.py` finds and scores URLs; `processing.py` downloads, extracts, classifies, embeds, and stores documents; `orchestration.py` ties them together with scheduling.
+
+### `frontend/`
+
+React SPA built with Vite and Tailwind. Connects to the FastAPI backend via `VITE_API_URL`. Session ID stored in `localStorage`. Language detection auto-applied based on API response; user can override via the header dropdown.
+
+### `dashboard/app.py`
+
+Streamlit app for internal use. Not exposed publicly in production. Useful for monitoring crawl runs, browsing and searching the document index, running the Q&A pipeline interactively, and manually ingesting individual documents.
+
+---
+
+## Database tables
+
+| Table | Owner | Purpose |
+|---|---|---|
+| `crawl_runs` | Pipeline | One row per crawl execution |
+| `documents` | Pipeline | All discovered documents |
+| `document_classifications` | Pipeline | LLM-generated metadata |
+| `content_chunks` | Pipeline | Text chunks linked to Qdrant vector IDs |
+| `chat_sessions` | Chatbot | One row per conversation |
+| `chat_messages` | Chatbot | All messages with language and sources |
+
+---
+
+## Adding a new site to the scraper
+
+1. Add a `SiteConfig` entry in `src/config/site_configs.py`
+2. Add `<name>_enabled: bool = Field(default=False)` in `src/config/settings.py`
+3. Add it to the `enabled_sites` property in `settings.py`
+4. Add `<NAME>_ENABLED=true` to `.env`
+5. Run discovery: `poetry run python -c "from src.flows.discovery import discover_content; discover_content('<name>')"`
