@@ -222,16 +222,16 @@ DOCUMENT_TYPES = [
 # Target crops (Uganda focus)
 TARGET_CROPS = [
     "maize",
-    "beans",
-    "cassava",
-    "sweet_potato",
-    "rice",
-    "coffee",
-    "banana",
-    "millet",
     "sorghum",
     "groundnut",
-    "soybean",
+    # "beans",
+    # "cassava",
+    # "sweet_potato",
+    # "rice",
+    # "coffee",
+    # "banana",
+    # "millet",
+    # "soybean",
 ]
 
 
