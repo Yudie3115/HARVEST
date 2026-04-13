@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: PostgresDsn = Field(
-        default="postgresql://scraper:ph_scraper_pass@localhost:5432/postharvest_scraper"
+        default="postgresql://scraper:ph_scraper_pass@localhost:5433/postharvest_scraper"
     )
     database_pool_size: int = Field(default=20)
     database_max_overflow: int = Field(default=0)

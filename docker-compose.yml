@@ -1,8 +1,8 @@
 services:
   # PostgreSQL - Metadata & crawl state
   # Data is stored in ./data/postgres so it survives `docker compose down`
-  # and is accessible to local tooling. Stop any local PostgreSQL first:
-  #   sudo systemctl stop postgresql
+  # and is accessible to local tooling. Exposed on host port 5433 to avoid
+  # conflict with any local PostgreSQL instance running on 5432.
   postgres:
     image: postgres:15-alpine
     container_name: postharvest-postgres
@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ph_scraper_pass
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
