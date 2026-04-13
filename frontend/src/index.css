@@ -56,6 +56,11 @@ body::after {
 .dot-2 { animation: dotBounce 1.3s ease-in-out 0.18s infinite; }
 .dot-3 { animation: dotBounce 1.3s ease-in-out 0.36s infinite; }
 
+/* Markdown: remove bottom margin from last child in a bubble */
+.md-last-no-margin:last-child {
+  margin-bottom: 0 !important;
+}
+
 /* Select appearance reset */
 select {
   -webkit-appearance: none;
