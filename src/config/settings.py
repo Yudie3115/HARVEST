@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     agriculture_enabled: bool = Field(default=True)
     extension_enabled: bool = Field(default=True)
     ubos_enabled: bool = Field(default=True)
+    aphlis_enabled: bool = Field(default=False)
     
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
@@ -117,6 +118,8 @@ class Settings(BaseSettings):
             sites.append("extension")
         if self.ubos_enabled:
             sites.append("ubos")
+        if self.aphlis_enabled:
+            sites.append("aphlis")
         return sites
 
 

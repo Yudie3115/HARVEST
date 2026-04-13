@@ -149,6 +149,7 @@ SITE_CONFIGS: dict[str, SiteConfig] = {
         rate_limit=2.0,
         requires_js=True,  # May have dynamic content
     ),
+    
     "aphlis": SiteConfig(
         name="APHLIS (African Postharvest Losses Information System)",
         url="https://www.aphlis.net/en",
