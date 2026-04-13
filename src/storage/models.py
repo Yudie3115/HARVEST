@@ -3,6 +3,7 @@ Database models for PostgreSQL
 """
 from datetime import datetime
 from typing import Optional
+import uuid
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -260,6 +261,59 @@ class SystemMetric(Base):
         default=datetime.utcnow,
         index=True
     )
+
+
+# ---------------------------------------------------------------------------
+# Chat models
+# ---------------------------------------------------------------------------
+
+class ChannelEnum(str, enum.Enum):
+    """Supported chat channels"""
+    web = "web"
+    whatsapp = "whatsapp"
+
+
+class MessageRoleEnum(str, enum.Enum):
+    """Chat message roles"""
+    user = "user"
+    assistant = "assistant"
+
+
+class ChatSession(Base):
+    """A conversation session for web or WhatsApp users"""
+    __tablename__ = "chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel = Column(SQLEnum(ChannelEnum), nullable=False)
+    identifier = Column(String, nullable=False, index=True)  # UUID (web) or phone number (WhatsApp)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_active_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    messages = relationship(
+        "ChatMessage",
+        back_populates="session",
+        order_by="ChatMessage.created_at",
+    )
+
+
+class ChatMessage(Base):
+    """A single message within a ChatSession"""
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(SQLEnum(MessageRoleEnum), nullable=False)
+    content = Column(Text, nullable=False)
+    detected_language = Column(String, nullable=True)  # e.g. "eng", "lug"
+    sources = Column(JSONB, nullable=True)  # [{title, url, site_name}]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("ChatSession", back_populates="messages")
 
 
 # Indexes for common queries

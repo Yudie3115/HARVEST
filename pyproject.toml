@@ -50,6 +50,11 @@ plotly = "^5.18.0"
 pandas = "^2.1.0"
 altair = "^5.2.0"
 
+# API
+fastapi = ">=0.109.0"
+uvicorn = {extras = ["standard"], version = ">=0.27.0"}
+slowapi = ">=0.1.9"
+
 # Utils
 pydantic = "^2.5.0"
 pydantic-settings = "^2.1.0"
@@ -58,7 +63,7 @@ python-dotenv = "^1.0.0"
 tenacity = "^8.2.0"
 griffe = "<1.0.0"  # prefect 2.x requires griffe <1.0; griffe 1.0 moved griffe.dataclasses
 tqdm = "^4.66.0"
-python-multipart = "^0.0.6"
+python-multipart = ">=0.0.9"
 aiofiles = "^23.2.0"
 
 # Development

@@ -93,6 +93,38 @@ services:
     networks:
       - scraper-network
 
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: postharvest-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - scraper-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    container_name: postharvest-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    networks:
+      - scraper-network
+    restart: unless-stopped
+
 networks:
   scraper-network:
     driver: bridge

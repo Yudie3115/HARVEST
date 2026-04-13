@@ -1,0 +1,89 @@
+"""
+PostHarvest Knowledge API — FastAPI application entry point.
+
+Start with:
+    uvicorn src.api.main:app --reload
+"""
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from src.config.settings import settings
+from src.api.routes import chat, health, session, whatsapp
+
+
+# ---------------------------------------------------------------------------
+# Lifespan — initialise and teardown all service clients once
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create service clients on startup and cleanly dispose them on shutdown."""
+    logger.info("Starting PostHarvest Knowledge API …")
+
+    # Lazy imports so that import errors surface at startup, not at module load
+    from src.llm.client import LLMClient
+    from src.llm.embeddings import EmbeddingClient
+    from src.storage.postgres import PostgresClient
+    from src.storage.vector_db import VectorDBClient
+    from src.translation.client import TranslationClient
+    from src.api.services.whatsapp_service import WhatsAppService
+
+    postgres_client = PostgresClient()
+    # Ensure chat tables exist (no-op if already present)
+    postgres_client.create_tables()
+
+    app.state.postgres_client = postgres_client
+    app.state.llm_client = LLMClient()
+    app.state.embedding_client = EmbeddingClient()
+    app.state.vector_db_client = VectorDBClient()
+    app.state.translation_client = TranslationClient()
+    app.state.whatsapp_service = WhatsAppService(
+        token=settings.whatsapp_token,
+        phone_number_id=settings.whatsapp_phone_number_id,
+    )
+
+    logger.info("All service clients initialised — API ready.")
+
+    yield  # application is running
+
+    # Shutdown
+    logger.info("Shutting down PostHarvest Knowledge API …")
+    postgres_client.close()
+    logger.info("Shutdown complete.")
+
+
+# ---------------------------------------------------------------------------
+# Application factory
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+    title="PostHarvest Knowledge API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.api_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
+# Rate limiter (global — per-route limits are applied in each router)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Routers
+app.include_router(health.router)
+app.include_router(session.router, prefix="/session")
+app.include_router(chat.router)
+app.include_router(whatsapp.router, prefix="/webhook")

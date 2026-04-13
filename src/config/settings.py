@@ -100,6 +100,16 @@ class Settings(BaseSettings):
     translation_enabled: bool = Field(default=True)
     translation_min_confidence: float = Field(default=0.80)
 
+    # WhatsApp (Meta Cloud API)
+    whatsapp_token: str = Field(default="")
+    whatsapp_phone_number_id: str = Field(default="")
+    whatsapp_verify_token: str = Field(default="")
+
+    # API
+    api_rate_limit_web: int = Field(default=20)       # requests per hour per IP
+    api_rate_limit_whatsapp: int = Field(default=30)  # messages per hour per phone
+    api_cors_origins: list[str] = Field(default=["*"])
+
     # Development
     debug: bool = Field(default=False)
     environment: Literal["development", "staging", "production"] = Field(
