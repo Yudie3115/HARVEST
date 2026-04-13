@@ -149,7 +149,60 @@ SITE_CONFIGS: dict[str, SiteConfig] = {
         rate_limit=2.0,
         requires_js=True,  # May have dynamic content
     ),
-    
+    "aphlis": SiteConfig(
+        name="APHLIS (African Postharvest Losses Information System)",
+        url="https://www.aphlis.net/en",
+        strategy="recursive_crawl",
+        max_depth=3,
+        url_patterns=[
+            r".*/en/news/.*",
+            r".*/en/page/.*",
+            r".*publication.*",
+            r".*methodology.*",
+            r".*training.*",
+            r".*outreach.*",
+            r".*report.*",
+            r".*\.pdf$",
+        ],
+        exclude_patterns=[
+            r".*/en/data/tables/.*",  # JS-driven interactive tables, not crawlable
+            r".*/en/maps/.*",          # Interactive map visualizations
+            r".*login.*",
+            r".*register.*",
+        ],
+        content_selectors=[
+            "//article",
+            "//div[contains(@class, 'content')]",
+            "//div[contains(@class, 'news')]",
+            "//div[contains(@class, 'page-content')]",
+        ],
+        keywords=[
+            "post-harvest",
+            "postharvest",
+            "loss",
+            "storage",
+            "maize",
+            "sorghum",
+            "cereal",
+            "grain",
+            "sub-Saharan Africa",
+            "Uganda",
+            "aflatoxin",
+            "value chain",
+            "drying",
+            "pest",
+        ],
+        document_patterns=[
+            r".*postharvest.*\.pdf$",
+            r".*APHLIS.*\.pdf$",
+            r".*loss.*estimate.*\.pdf$",
+            r".*methodology.*\.pdf$",
+        ],
+        llm_filter=True,
+        rate_limit=1.5,
+        requires_js=True,  # Interactive data portal with JS-rendered components
+    ),
+
     "ubos": SiteConfig(
         name="Uganda Bureau of Statistics",
         url="https://www.ubos.org/",
