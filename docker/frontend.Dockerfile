@@ -3,13 +3,15 @@ FROM node:20-alpine AS builder
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 
+RUN npm install -g pnpm
+
 WORKDIR /app
 
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:alpine
 

@@ -6,11 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir poetry && \
-    poetry config virtualenvs.create false
-
-COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-dev --no-interaction --no-ansi
+COPY requirements.api.txt ./
+RUN pip install --no-cache-dir -r requirements.api.txt
 
 COPY src/ ./src/
 
