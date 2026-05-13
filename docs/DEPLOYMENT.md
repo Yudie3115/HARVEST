@@ -71,6 +71,7 @@ dokku config:set postharvest-api \
   WHATSAPP_TOKEN=... \
   WHATSAPP_PHONE_NUMBER_ID=... \
   WHATSAPP_VERIFY_TOKEN=your-chosen-verify-token \
+  WHATSAPP_APP_SECRET=your-app-secret \
   API_CORS_ORIGINS='["https://chat.yourdomain.com"]' \
   ENVIRONMENT=production \
   LOG_LEVEL=INFO
@@ -255,6 +256,7 @@ dokku ps:scale postharvest-api web=2
 | `WHATSAPP_TOKEN` | No | WhatsApp — webhook inactive if empty |
 | `WHATSAPP_PHONE_NUMBER_ID` | No | WhatsApp |
 | `WHATSAPP_VERIFY_TOKEN` | No | WhatsApp — any string you choose |
+| `WHATSAPP_APP_SECRET` | Strongly recommended | WhatsApp — Meta App Secret for webhook signature verification |
 | `API_CORS_ORIGINS` | Yes | JSON array of allowed origins, e.g. `["https://chat.yourdomain.com"]` |
 | `QDRANT_URL` | Yes | Default `http://localhost:6333` |
 | `MINIO_ENDPOINT` | Yes | Default `localhost:9000` |
