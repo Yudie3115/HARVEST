@@ -1,9 +1,14 @@
 """
 WhatsApp webhook routes — Meta verification and inbound message handling.
 """
+import asyncio
+import hashlib
+import hmac
+import time
+from collections import OrderedDict
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
-from slowapi import Limiter
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
@@ -24,16 +29,73 @@ from src.storage.models import ChannelEnum, ChatSession
 from src.storage.vector_db import VectorDBClient
 from src.translation.client import TranslationClient
 
-# Rate-limit by phone number: the key is extracted from the request inside the handler.
-def _phone_key(request: Request) -> str:
-    """Extract sender phone from the parsed WhatsApp payload (best-effort)."""
-    # slowapi calls this synchronously; we fall back to remote IP if unavailable.
-    return getattr(request.state, "whatsapp_sender", request.client.host if request.client else "unknown")
-
-
-limiter = Limiter(key_func=_phone_key)
 router = APIRouter(tags=["whatsapp"])
 
+
+# ---------------------------------------------------------------------------
+# Webhook signature verification
+# ---------------------------------------------------------------------------
+
+def _verify_signature(body: bytes, signature_header: str, app_secret: str) -> bool:
+    """Return True iff the X-Hub-Signature-256 header matches the payload."""
+    if not signature_header:
+        return False
+    expected = "sha256=" + hmac.new(
+        app_secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature_header)
+
+
+# ---------------------------------------------------------------------------
+# Per-phone rate limiting (sliding window, in-memory)
+# ---------------------------------------------------------------------------
+
+_PHONE_TIMESTAMPS: dict[str, list[float]] = {}
+_RATE_WINDOW = 3600.0  # seconds
+
+
+def _is_rate_limited(phone: str, limit: int) -> bool:
+    """Return True if *phone* has exceeded *limit* messages in the past hour."""
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW
+    timestamps = [ts for ts in _PHONE_TIMESTAMPS.get(phone, []) if ts > cutoff]
+    if len(timestamps) >= limit:
+        _PHONE_TIMESTAMPS[phone] = timestamps
+        return True
+    timestamps.append(now)
+    _PHONE_TIMESTAMPS[phone] = timestamps
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Message deduplication (bounded in-memory cache, 1-hour TTL)
+# ---------------------------------------------------------------------------
+
+_SEEN_IDS: OrderedDict[str, float] = OrderedDict()
+_SEEN_IDS_MAX = 1000
+_SEEN_IDS_TTL = 3600.0
+
+
+def _is_duplicate(msg_id: str) -> bool:
+    """Return True if *msg_id* was already processed within the TTL window."""
+    now = time.monotonic()
+    while _SEEN_IDS:
+        oldest_id, ts = next(iter(_SEEN_IDS.items()))
+        if now - ts > _SEEN_IDS_TTL:
+            _SEEN_IDS.popitem(last=False)
+        else:
+            break
+    if msg_id in _SEEN_IDS:
+        return True
+    _SEEN_IDS[msg_id] = now
+    if len(_SEEN_IDS) > _SEEN_IDS_MAX:
+        _SEEN_IDS.popitem(last=False)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 @router.get("/whatsapp")
 async def whatsapp_verify(
@@ -57,7 +119,6 @@ async def whatsapp_verify(
 
 
 @router.post("/whatsapp", status_code=200)
-@limiter.limit(f"{settings.api_rate_limit_whatsapp}/hour")
 async def whatsapp_webhook(
     request: Request,
     db: Session = Depends(get_db),
@@ -70,33 +131,71 @@ async def whatsapp_webhook(
     """
     Receive inbound WhatsApp messages, run the RAG pipeline, and reply.
 
-    Meta requires a 200 response within 20 s; processing happens inline here.
-    For high-volume deployments consider offloading to a background task queue.
+    Meta requires a 200 response within 20 s. High-volume deployments should
+    move process_chat to a background task queue.
     """
-    payload: dict = await request.json()
+    # ------------------------------------------------------------------
+    # 1. Verify webhook signature (X-Hub-Signature-256)
+    # ------------------------------------------------------------------
+    body = await request.body()
+    if settings.whatsapp_app_secret:
+        sig = request.headers.get("X-Hub-Signature-256", "")
+        if not _verify_signature(body, sig, settings.whatsapp_app_secret):
+            logger.warning("WhatsApp webhook signature mismatch — request rejected")
+            raise HTTPException(status_code=403, detail="Invalid signature")
+    else:
+        logger.warning("WHATSAPP_APP_SECRET not set — webhook signature verification is disabled")
 
-    # ----------------------------------------------------------------
-    # Parse the Meta webhook payload
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 2. Parse the Meta webhook payload
+    # ------------------------------------------------------------------
     try:
+        payload: dict = await request.json()
         entry = payload["entry"][0]
         changes = entry["changes"][0]["value"]
         message_obj = changes["messages"][0]
         sender_phone: str = message_obj["from"]
-        message_text: str = message_obj["text"]["body"]
+        msg_id: str = message_obj["id"]
     except (KeyError, IndexError, TypeError):
-        # Not a text message or unexpected payload structure — ack and ignore.
-        logger.debug(f"WhatsApp webhook: unhandled payload type: {payload}")
+        logger.debug(f"WhatsApp webhook: unhandled payload structure: {payload!r}")
         return {"status": "ignored"}
 
-    # Store sender phone for the rate-limit key function
-    request.state.whatsapp_sender = sender_phone
+    # ------------------------------------------------------------------
+    # 3. Deduplicate — Meta retries on slow/failed responses
+    # ------------------------------------------------------------------
+    if _is_duplicate(msg_id):
+        logger.info(f"Duplicate WhatsApp message {msg_id} from {sender_phone} — ignored")
+        return {"status": "duplicate"}
 
+    # ------------------------------------------------------------------
+    # 4. Per-phone rate limiting
+    # ------------------------------------------------------------------
+    if _is_rate_limited(sender_phone, settings.api_rate_limit_whatsapp):
+        logger.warning(f"WhatsApp rate limit exceeded for {sender_phone}")
+        return {"status": "rate_limited"}
+
+    # ------------------------------------------------------------------
+    # 5. Non-text message handling
+    # ------------------------------------------------------------------
+    if message_obj.get("type") != "text" or "text" not in message_obj:
+        logger.debug(
+            f"WhatsApp non-text message from {sender_phone}: type={message_obj.get('type')!r}"
+        )
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "I can only answer text questions — please type your question.",
+            )
+        except Exception:
+            pass
+        return {"status": "ignored"}
+
+    message_text: str = message_obj["text"]["body"]
     logger.info(f"WhatsApp message from {sender_phone}: {message_text[:80]!r}")
 
-    # ----------------------------------------------------------------
-    # Look up or create a ChatSession for this phone number
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 6. Look up or create a ChatSession for this phone number
+    # ------------------------------------------------------------------
     chat_session: ChatSession | None = (
         db.query(ChatSession)
         .filter(
@@ -116,24 +215,37 @@ async def whatsapp_webhook(
         db.refresh(chat_session)
         logger.info(f"Created WhatsApp session {chat_session.id} for {sender_phone}")
 
-    # ----------------------------------------------------------------
-    # Run RAG pipeline
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 7. Run RAG pipeline with a 15-second timeout
+    # ------------------------------------------------------------------
     try:
-        chat_response = process_chat(
-            request=ChatRequest(
-                session_id=str(chat_session.id),
-                message=message_text,
+        chat_response = await asyncio.wait_for(
+            asyncio.to_thread(
+                process_chat,
+                request=ChatRequest(
+                    session_id=str(chat_session.id),
+                    message=message_text,
+                ),
+                db=db,
+                llm_client=llm_client,
+                embedding_client=embedding_client,
+                vector_db_client=vector_db_client,
+                translation_client=translation_client,
             ),
-            db=db,
-            llm_client=llm_client,
-            embedding_client=embedding_client,
-            vector_db_client=vector_db_client,
-            translation_client=translation_client,
+            timeout=15.0,
         )
+    except asyncio.TimeoutError:
+        logger.error(f"RAG pipeline timed out for {sender_phone}")
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "Sorry, your request took too long to process. Please try again.",
+            )
+        except Exception:
+            pass
+        return {"status": "timeout"}
     except Exception as exc:
         logger.error(f"WhatsApp RAG pipeline error for {sender_phone}: {exc}")
-        # Reply with a graceful error rather than timing out the webhook
         try:
             whatsapp_service.send_text(
                 sender_phone,
@@ -143,9 +255,9 @@ async def whatsapp_webhook(
             pass
         return {"status": "error"}
 
-    # ----------------------------------------------------------------
-    # Send reply
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 8. Send reply
+    # ------------------------------------------------------------------
     try:
         whatsapp_service.send_text(sender_phone, chat_response.answer)
     except Exception as exc:

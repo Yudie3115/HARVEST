@@ -1,0 +1,289 @@
+"""
+Tests for WhatsApp webhook helper functions and route handlers.
+"""
+import asyncio
+import hashlib
+import hmac
+import json as _json
+import pytest
+from unittest.mock import MagicMock, patch
+
+
+# ---------------------------------------------------------------------------
+# Helper: reset module-level state between tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def reset_whatsapp_state():
+    """Clear in-memory dedup and rate-limit caches between tests."""
+    import src.api.routes.whatsapp as wh
+    wh._SEEN_IDS.clear()
+    wh._PHONE_TIMESTAMPS.clear()
+    yield
+    wh._SEEN_IDS.clear()
+    wh._PHONE_TIMESTAMPS.clear()
+
+
+# ---------------------------------------------------------------------------
+# _verify_signature
+# ---------------------------------------------------------------------------
+
+class TestVerifySignature:
+    def _sig(self, body: bytes, secret: str) -> str:
+        return "sha256=" + hmac.new(
+            secret.encode(), body, hashlib.sha256
+        ).hexdigest()
+
+    def test_valid_signature_returns_true(self):
+        from src.api.routes.whatsapp import _verify_signature
+        body = b'{"entry": []}'
+        secret = "mysecret"
+        assert _verify_signature(body, self._sig(body, secret), secret) is True
+
+    def test_wrong_signature_returns_false(self):
+        from src.api.routes.whatsapp import _verify_signature
+        body = b'{"entry": []}'
+        assert _verify_signature(body, "sha256=wrong", "mysecret") is False
+
+    def test_empty_signature_returns_false(self):
+        from src.api.routes.whatsapp import _verify_signature
+        assert _verify_signature(b"body", "", "mysecret") is False
+
+    def test_tampered_body_returns_false(self):
+        from src.api.routes.whatsapp import _verify_signature
+        body = b'{"entry": []}'
+        secret = "mysecret"
+        sig = self._sig(body, secret)
+        assert _verify_signature(b"tampered", sig, secret) is False
+
+
+# ---------------------------------------------------------------------------
+# _is_duplicate
+# ---------------------------------------------------------------------------
+
+class TestIsDuplicate:
+    def test_first_occurrence_returns_false(self):
+        from src.api.routes.whatsapp import _is_duplicate
+        assert _is_duplicate("msg-abc") is False
+
+    def test_second_occurrence_returns_true(self):
+        from src.api.routes.whatsapp import _is_duplicate
+        _is_duplicate("msg-abc")
+        assert _is_duplicate("msg-abc") is True
+
+    def test_different_ids_are_independent(self):
+        from src.api.routes.whatsapp import _is_duplicate
+        assert _is_duplicate("msg-1") is False
+        assert _is_duplicate("msg-2") is False
+        assert _is_duplicate("msg-1") is True
+        assert _is_duplicate("msg-2") is True
+
+
+# ---------------------------------------------------------------------------
+# _is_rate_limited
+# ---------------------------------------------------------------------------
+
+class TestIsRateLimited:
+    def test_under_limit_returns_false(self):
+        from src.api.routes.whatsapp import _is_rate_limited
+        assert _is_rate_limited("+256700000001", 3) is False
+        assert _is_rate_limited("+256700000001", 3) is False
+        assert _is_rate_limited("+256700000001", 3) is False
+
+    def test_at_limit_returns_true(self):
+        from src.api.routes.whatsapp import _is_rate_limited
+        _is_rate_limited("+256700000002", 3)
+        _is_rate_limited("+256700000002", 3)
+        _is_rate_limited("+256700000002", 3)
+        assert _is_rate_limited("+256700000002", 3) is True
+
+    def test_different_phones_are_independent(self):
+        from src.api.routes.whatsapp import _is_rate_limited
+        _is_rate_limited("+256700000003", 1)
+        assert _is_rate_limited("+256700000003", 1) is True
+        assert _is_rate_limited("+256700000004", 1) is False
+
+
+# ---------------------------------------------------------------------------
+# Route integration tests
+# ---------------------------------------------------------------------------
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from src.api.routes.whatsapp import router
+from src.api.dependencies import (
+    get_db, get_llm_client, get_embedding_client,
+    get_vector_db_client, get_translation_client, get_whatsapp_service,
+)
+
+
+def _make_client():
+    """Build a TestClient with all heavy dependencies mocked out."""
+    app = FastAPI()
+    app.include_router(router, prefix="/webhook")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[get_llm_client] = lambda: MagicMock()
+    app.dependency_overrides[get_embedding_client] = lambda: MagicMock()
+    app.dependency_overrides[get_vector_db_client] = lambda: MagicMock()
+    app.dependency_overrides[get_translation_client] = lambda: MagicMock()
+    mock_wa_service = MagicMock()
+    app.dependency_overrides[get_whatsapp_service] = lambda: mock_wa_service
+    return TestClient(app, raise_server_exceptions=False), mock_wa_service
+
+
+def _whatsapp_payload(
+    sender: str = "+256700000000",
+    text: str = "Hello",
+    msg_id: str = "wamid.test123",
+    msg_type: str = "text",
+) -> dict:
+    payload: dict = {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{
+                        "from": sender,
+                        "id": msg_id,
+                        "type": msg_type,
+                    }]
+                }
+            }]
+        }]
+    }
+    if msg_type == "text":
+        payload["entry"][0]["changes"][0]["value"]["messages"][0]["text"] = {"body": text}
+    return payload
+
+
+def _sign(body: bytes, secret: str) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+class TestWebhookVerify:
+    def test_valid_token_returns_challenge(self):
+        client, _ = _make_client()
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_verify_token = "test-token"
+            resp = client.get(
+                "/webhook/whatsapp",
+                params={"hub.mode": "subscribe", "hub.verify_token": "test-token", "hub.challenge": "42"},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == 42
+
+    def test_wrong_token_returns_403(self):
+        client, _ = _make_client()
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_verify_token = "test-token"
+            resp = client.get(
+                "/webhook/whatsapp",
+                params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "42"},
+            )
+        assert resp.status_code == 403
+
+
+class TestWebhookPost:
+    def _post(self, client, payload: dict, secret: str = "", extra_headers: dict = None):
+        body = _json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if secret:
+            headers["X-Hub-Signature-256"] = _sign(body, secret)
+        if extra_headers:
+            headers.update(extra_headers)
+        return client.post("/webhook/whatsapp", content=body, headers=headers)
+
+    def test_invalid_signature_returns_403(self):
+        client, _ = _make_client()
+        payload = _whatsapp_payload()
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = "real-secret"
+            s.api_rate_limit_whatsapp = 30
+            body = _json.dumps(payload).encode()
+            resp = client.post(
+                "/webhook/whatsapp",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Hub-Signature-256": "sha256=invalidsignature",
+                },
+            )
+        assert resp.status_code == 403
+
+    def test_no_app_secret_configured_skips_verification(self):
+        client, _ = _make_client()
+        payload = _whatsapp_payload()
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp.process_chat") as mock_chat:
+                mock_chat.return_value = MagicMock(answer="Reply")
+                with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                    resp = self._post(client, payload)
+        assert resp.status_code == 200
+
+    def test_duplicate_message_returns_duplicate_status(self):
+        client, _ = _make_client()
+        payload = _whatsapp_payload(msg_id="wamid.dup")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=True):
+                resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "duplicate"
+
+    def test_rate_limited_phone_returns_rate_limited_status(self):
+        client, _ = _make_client()
+        payload = _whatsapp_payload()
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=True):
+                    resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "rate_limited"
+
+    def test_non_text_message_sends_polite_reply(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(msg_type="image")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ignored"
+        mock_svc.send_text.assert_called_once()
+        reply_text = mock_svc.send_text.call_args[0][1]
+        assert "text" in reply_text.lower() or "type" in reply_text.lower()
+
+    def test_text_message_runs_pipeline_and_replies(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="What is maize drying?")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch("src.api.routes.whatsapp.process_chat") as mock_chat:
+                        mock_chat.return_value = MagicMock(answer="Dry at 14% moisture.")
+                        resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        mock_svc.send_text.assert_called_once_with("+256700000000", "Dry at 14% moisture.")
+
+    def test_pipeline_timeout_sends_error_and_returns_timeout(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="slow question")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                        resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "timeout"
+        mock_svc.send_text.assert_called_once()
