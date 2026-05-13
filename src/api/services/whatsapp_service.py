@@ -4,8 +4,10 @@ WhatsApp Cloud API client — sends outbound text messages via Meta's Graph API.
 import httpx
 from loguru import logger
 
-_GRAPH_API_VERSION = "v18.0"
+_GRAPH_API_VERSION = "v21.0"
 _GRAPH_API_BASE = "https://graph.facebook.com"
+_MAX_MESSAGE_CHARS = 4000
+_TRUNCATION_SUFFIX = "\n\n[Response truncated]"
 
 
 class WhatsAppService:
@@ -22,11 +24,17 @@ class WhatsAppService:
 
         Args:
             recipient_phone: E.164 phone number of the recipient, e.g. "+256700000000".
-            message: Text body to send (max 4096 chars per Meta docs).
+            message: Text body to send. Truncated to 4000 chars if longer.
 
         Raises:
             httpx.HTTPStatusError: If the Graph API returns a non-2xx status.
         """
+        if len(message) > _MAX_MESSAGE_CHARS:
+            message = message[: _MAX_MESSAGE_CHARS - len(_TRUNCATION_SUFFIX)] + _TRUNCATION_SUFFIX
+            logger.warning(
+                f"WhatsApp message to {recipient_phone} truncated to {_MAX_MESSAGE_CHARS} chars"
+            )
+
         url = (
             f"{_GRAPH_API_BASE}/{_GRAPH_API_VERSION}"
             f"/{self._phone_number_id}/messages"
