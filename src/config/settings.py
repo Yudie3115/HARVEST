@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     whatsapp_token: str = Field(default="")
     whatsapp_phone_number_id: str = Field(default="")
     whatsapp_verify_token: str = Field(default="")
+    whatsapp_app_secret: str = Field(default="")
 
     # API
     api_rate_limit_web: int = Field(default=20)       # requests per hour per IP
