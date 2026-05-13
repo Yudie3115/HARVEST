@@ -6,7 +6,7 @@ Production deployment on a DigitalOcean droplet running Dokku.
 
 ## Prerequisites
 
-- A DigitalOcean droplet (Ubuntu 22.04, 4 GB RAM minimum recommended)
+- A DigitalOcean droplet (Ubuntu 22.04) — see [Droplet sizing](#droplet-sizing) for specs
 - A domain name with DNS you control
 - A Meta developer account (for WhatsApp — optional, can deploy without it initially)
 - SSH access to the droplet
@@ -202,6 +202,49 @@ poetry run python scripts/init_db.py
 # Start the Prefect worker (run in screen or systemd)
 poetry run prefect worker start --pool postharvest-pool
 ```
+
+---
+
+## Droplet sizing
+
+Everything runs on a single droplet: two Dokku-managed containers (API + frontend) plus four Docker Compose services (PostgreSQL, Qdrant, MinIO, Prefect server) and a Prefect worker process. The memory adds up quickly.
+
+### What each service consumes at idle
+
+| Service | Typical idle RAM |
+|---|---|
+| OS + system processes | ~400 MB |
+| PostgreSQL 15 | ~350 MB |
+| Qdrant | ~500 MB (grows with collection size) |
+| MinIO | ~300 MB |
+| Prefect server | ~500 MB |
+| Prefect worker | ~400 MB |
+| FastAPI API container | ~350 MB |
+| nginx (frontend) | ~40 MB |
+| **Total** | **~2.8 GB idle** |
+
+During a crawl run the Prefect worker climbs to ~600–800 MB while downloading and processing documents. That pushes peak usage to ~3.5 GB.
+
+### Minimum viable
+
+**2 vCPUs · 4 GB RAM · 80 GB SSD**
+
+This is the smallest configuration that fits all services without constant swapping. Expect it to feel tight: you will have roughly 200–400 MB of headroom at idle, and a busy crawl run will use most of that. Monitor memory with `free -h` after your first full crawl.
+
+> If you are using **local embeddings** (`EMBEDDING_PROVIDER=local`) or **Ollama** (`LLM_PROVIDER=ollama`) instead of the OpenAI defaults, add at least 2 GB for the model — the minimum becomes **6 GB RAM**.
+
+### Storage growth
+
+The 80 GB SSD fills up roughly like this at the start:
+
+| Item | Approximate size |
+|---|---|
+| OS + Docker images | ~15 GB |
+| Qdrant vectors (per 10 k chunks) | ~60 MB |
+| MinIO raw documents | depends on corpus — budget 1 GB per ~500 PDFs |
+| PostgreSQL metadata | < 1 GB for years of normal use |
+
+80 GB gives comfortable room for a few thousand documents. If the corpus grows to tens of thousands of documents, upgrade the volume or attach block storage to MinIO before the disk fills.
 
 ---
 
