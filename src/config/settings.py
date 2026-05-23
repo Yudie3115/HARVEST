@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     translation_enabled: bool = Field(default=True)
     translation_min_confidence: float = Field(default=0.80)
 
+    # BertScore (answer faithfulness)
+    bertscore_enabled: bool = Field(default=True)
+    bertscore_model: str = Field(default="distilbert-base-uncased")
+
     # WhatsApp (Meta Cloud API)
     whatsapp_token: str = Field(default="")
     whatsapp_phone_number_id: str = Field(default="")

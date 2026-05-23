@@ -10,6 +10,8 @@ Endpoints:
   POST /admin/crawl/full             → trigger Prefect full crawl
   POST /admin/crawl/incremental      → trigger Prefect incremental update
   POST /admin/documents/ingest       → file or URL ingestion
+  GET  /admin/chat-quality           → paginated scored chat messages
+  GET  /admin/chat-quality/stats     → aggregate faithfulness stats
 """
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -21,7 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import cast, func
+from sqlalchemy import cast, func, text
 from sqlalchemy.dialects.postgresql import DATE
 from sqlalchemy.orm import Session
 
@@ -428,3 +430,117 @@ async def ingest_document(
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Chat quality (BertScore)
+# ---------------------------------------------------------------------------
+
+@router.get("/chat-quality/stats")
+def chat_quality_stats(
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Aggregate BertScore faithfulness statistics over all assistant messages."""
+    row = db.execute(text("""
+        SELECT
+            COUNT(*) FILTER (WHERE bert_score IS NOT NULL)            AS total_scored,
+            COUNT(*) FILTER (WHERE bert_score IS NULL)                AS total_unscored,
+            AVG((bert_score->>'f1')::float)
+                FILTER (WHERE bert_score IS NOT NULL)                  AS mean_f1,
+            COUNT(*) FILTER (
+                WHERE bert_score IS NOT NULL
+                  AND (bert_score->>'f1')::float < 0.4)               AS bucket_0_40,
+            COUNT(*) FILTER (
+                WHERE bert_score IS NOT NULL
+                  AND (bert_score->>'f1')::float >= 0.4
+                  AND (bert_score->>'f1')::float <  0.6)              AS bucket_40_60,
+            COUNT(*) FILTER (
+                WHERE bert_score IS NOT NULL
+                  AND (bert_score->>'f1')::float >= 0.6
+                  AND (bert_score->>'f1')::float <  0.8)              AS bucket_60_80,
+            COUNT(*) FILTER (
+                WHERE bert_score IS NOT NULL
+                  AND (bert_score->>'f1')::float >= 0.8)              AS bucket_80_100
+        FROM chat_messages
+        WHERE role = 'assistant'
+    """)).mappings().one()
+
+    return {
+        "total_scored": row["total_scored"],
+        "total_unscored": row["total_unscored"],
+        "mean_f1": round(float(row["mean_f1"]), 4) if row["mean_f1"] is not None else None,
+        "distribution": [
+            {"range": "0.0–0.4", "count": row["bucket_0_40"]},
+            {"range": "0.4–0.6", "count": row["bucket_40_60"]},
+            {"range": "0.6–0.8", "count": row["bucket_60_80"]},
+            {"range": "0.8–1.0", "count": row["bucket_80_100"]},
+        ],
+    }
+
+
+@router.get("/chat-quality")
+def chat_quality(
+    offset: int = 0,
+    limit: int = 20,
+    min_f1: Optional[float] = None,
+    max_f1: Optional[float] = None,
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Paginated list of scored assistant messages with the preceding user question.
+
+    Uses a PostgreSQL LATERAL JOIN to efficiently attach each assistant message
+    to the most recent user message that preceded it in the same session.
+    """
+    filters = ["am.role = 'assistant'", "am.bert_score IS NOT NULL"]
+    if min_f1 is not None:
+        filters.append(f"(am.bert_score->>'f1')::float >= {float(min_f1)}")
+    if max_f1 is not None:
+        filters.append(f"(am.bert_score->>'f1')::float <= {float(max_f1)}")
+
+    where_clause = " AND ".join(filters)
+
+    rows = db.execute(text(f"""
+        SELECT
+            am.id          AS message_id,
+            am.session_id,
+            am.content     AS answer,
+            am.bert_score,
+            am.created_at,
+            um.content     AS question
+        FROM chat_messages am
+        LEFT JOIN LATERAL (
+            SELECT content
+            FROM chat_messages
+            WHERE session_id = am.session_id
+              AND role = 'user'
+              AND created_at < am.created_at
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) um ON true
+        WHERE {where_clause}
+        ORDER BY am.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """), {"limit": limit, "offset": offset}).mappings().all()
+
+    total_row = db.execute(text(f"""
+        SELECT COUNT(*) AS cnt
+        FROM chat_messages am
+        WHERE {where_clause}
+    """)).mappings().one()
+
+    items = [
+        {
+            "message_id": str(r["message_id"]),
+            "session_id": str(r["session_id"]),
+            "question": r["question"],
+            "answer": r["answer"],
+            "bert_score": r["bert_score"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+    return {"items": items, "total": total_row["cnt"], "offset": offset, "limit": limit}

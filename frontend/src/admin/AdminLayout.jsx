@@ -2,18 +2,19 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, FileText, Search, MessageSquare,
-  Settings, Plus, LogOut, Loader2,
+  Settings, Plus, LogOut, Loader2, BarChart2,
 } from 'lucide-react'
 import { adminApi } from './api'
 import { cn } from '../lib/utils'
 
 const NAV = [
-  { to: '/admin/overview',      label: 'Overview',        Icon: LayoutDashboard },
-  { to: '/admin/documents',     label: 'Documents',       Icon: FileText        },
-  { to: '/admin/search',        label: 'Search',          Icon: Search          },
-  { to: '/admin/qa',            label: 'Knowledge Q&A',   Icon: MessageSquare   },
-  { to: '/admin/config',        label: 'Configuration',   Icon: Settings        },
-  { to: '/admin/add-document',  label: 'Add Document',    Icon: Plus            },
+  { to: '/admin/overview',       label: 'Overview',        Icon: LayoutDashboard },
+  { to: '/admin/documents',      label: 'Documents',       Icon: FileText        },
+  { to: '/admin/search',         label: 'Search',          Icon: Search          },
+  { to: '/admin/qa',             label: 'Knowledge Q&A',   Icon: MessageSquare   },
+  { to: '/admin/chat-quality',   label: 'Chat Quality',    Icon: BarChart2       },
+  { to: '/admin/config',         label: 'Configuration',   Icon: Settings        },
+  { to: '/admin/add-document',   label: 'Add Document',    Icon: Plus            },
 ]
 
 export default function AdminLayout() {

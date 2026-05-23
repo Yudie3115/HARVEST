@@ -1,9 +1,10 @@
 """
 Core RAG chat service — orchestrates translation, embedding, retrieval, and LLM synthesis.
 """
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
+from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ def process_chat(
     embedding_client: EmbeddingClient,
     vector_db_client: VectorDBClient,
     translation_client: TranslationClient,
+    background_tasks: Optional[BackgroundTasks] = None,
 ) -> ChatResponse:
     """
     Orchestrate the full RAG pipeline for a single chat turn.
@@ -188,6 +190,20 @@ def process_chat(
     chat_session.last_active_at = sqlfunc.now()
 
     db.commit()
+
+    # ------------------------------------------------------------------
+    # 10. Schedule faithfulness scoring (off critical path)
+    # ------------------------------------------------------------------
+    if background_tasks is not None:
+        from src.config.settings import settings as _settings
+        if _settings.bertscore_enabled and chunks:
+            from src.llm.bert_scoring import score_message_background
+            background_tasks.add_task(
+                score_message_background,
+                message_id=str(assistant_msg.id),
+                candidate=english_answer,
+                references=[c["text"] for c in chunks],
+            )
 
     logger.info(
         f"Chat turn complete for session {request.session_id} "

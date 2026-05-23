@@ -98,4 +98,15 @@ export const adminApi = {
     fd.append('site_name', siteName || 'manual')
     return request('POST', '/admin/documents/ingest', fd, true)
   },
+
+  getChatQualityStats: () => request('GET', '/admin/chat-quality/stats'),
+
+  getChatQuality: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.offset != null) q.set('offset', params.offset)
+    if (params.limit  != null) q.set('limit',  params.limit)
+    if (params.min_f1 != null) q.set('min_f1', params.min_f1)
+    if (params.max_f1 != null) q.set('max_f1', params.max_f1)
+    return request('GET', `/admin/chat-quality?${q}`)
+  },
 }

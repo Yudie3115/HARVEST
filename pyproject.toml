@@ -31,6 +31,7 @@ pytesseract = "^0.3.10"  # OCR for scanned PDFs
 
 # LLM & AI
 openai = "^1.0.0"
+bert-score = "^0.3.13"
 ollama = {version = "^0.1.0", optional = true}
 langchain = "^0.1.0"
 langchain-community = "^0.0.10"

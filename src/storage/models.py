@@ -311,6 +311,7 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     detected_language = Column(String, nullable=True)  # e.g. "eng", "lug"
     sources = Column(JSONB, nullable=True)  # [{title, url, site_name}]
+    bert_score = Column(JSONB, nullable=True)  # {precision, recall, f1, model, scored_at}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     session = relationship("ChatSession", back_populates="messages")

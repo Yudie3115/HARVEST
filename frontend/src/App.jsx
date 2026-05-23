@@ -8,6 +8,7 @@ import SearchPage from './admin/pages/Search'
 import QAPage from './admin/pages/QA'
 import ConfigPage from './admin/pages/Config'
 import AddDocumentPage from './admin/pages/AddDocument'
+import ChatQualityPage from './admin/pages/ChatQuality'
 import { adminApi } from './admin/api'
 
 function ProtectedAdmin({ children }) {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="qa" element={<QAPage />} />
         <Route path="config" element={<ConfigPage />} />
         <Route path="add-document" element={<AddDocumentPage />} />
+        <Route path="chat-quality" element={<ChatQualityPage />} />
       </Route>
     </Routes>
   )

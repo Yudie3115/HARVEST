@@ -1,7 +1,7 @@
 """
 Chat endpoint — POST /chat
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from loguru import logger
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -32,6 +32,7 @@ router = APIRouter(tags=["chat"])
 async def chat(
     request: Request,  # required by slowapi
     body: ChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     llm_client: LLMClient = Depends(get_llm_client),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
@@ -47,6 +48,7 @@ async def chat(
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
+            background_tasks=background_tasks,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
