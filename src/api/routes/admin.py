@@ -250,6 +250,41 @@ def check_health(_: str = Depends(require_admin)):
 
 
 # ---------------------------------------------------------------------------
+# Knowledge Q&A
+# ---------------------------------------------------------------------------
+
+class QARequest(BaseModel):
+    question: str
+    top_k: int = 8
+    score_threshold: float = 0.4
+
+
+@router.post("/qa")
+def knowledge_qa(
+    body: QARequest,
+    _: str = Depends(require_admin),
+    vector_db=Depends(get_vector_db_client),
+):
+    from src.llm.client import LLMClient
+    from src.llm.embeddings import EmbeddingClient
+
+    embedder = EmbeddingClient()
+    query_vec = embedder.embed(body.question)
+    results = vector_db.search(
+        query_vec,
+        top_k=body.top_k,
+        score_threshold=body.score_threshold,
+    )
+    if not results:
+        return {"answer": None, "sources": [], "reason": "no_results"}
+
+    llm = LLMClient()
+    chunk_payloads = [r["payload"] for r in results]
+    answer = llm.answer_question(body.question, chunk_payloads)
+    return {"answer": answer, "sources": results}
+
+
+# ---------------------------------------------------------------------------
 # Config (read-only)
 # ---------------------------------------------------------------------------
 

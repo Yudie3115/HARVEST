@@ -7,26 +7,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Alert } from '../../components/ui/alert'
 import { Progress } from '../../components/ui/progress'
-
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-async function askKnowledgeBase(question, topK, threshold, token) {
-  const res = await fetch(`${BASE}/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      session_id: `admin-${Date.now()}`,
-      message: question,
-      top_k: topK,
-      score_threshold: threshold,
-    }),
-  })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
-}
+import { adminApi } from '../api'
 
 export default function QAPage() {
   const [question, setQuestion] = useState('')
@@ -46,8 +27,7 @@ export default function QAPage() {
     setResult(null)
     setExpanded(null)
     try {
-      const token = sessionStorage.getItem('admin_token')
-      const data = await askKnowledgeBase(question.trim(), topK, threshold, token)
+      const data = await adminApi.qa(question.trim(), topK, threshold)
       setResult(data)
     } catch (e) {
       setError(e.message)
@@ -119,7 +99,13 @@ export default function QAPage() {
         <Alert variant="error" className="mb-4">{error}</Alert>
       )}
 
-      {result && (
+      {result?.reason === 'no_results' && (
+        <Alert variant="warning" className="mb-4">
+          No relevant chunks found above the similarity threshold. Try lowering the minimum similarity score or rephrasing your question.
+        </Alert>
+      )}
+
+      {result?.answer && (
         <div className="space-y-4 animate-fade-up">
           {/* Answer */}
           <Alert variant="success">

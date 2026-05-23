@@ -88,6 +88,9 @@ export const adminApi = {
   search: (query, topK = 10) =>
     request('POST', '/admin/search', { query, top_k: topK }),
 
+  qa: (question, topK = 8, scoreThreshold = 0.4) =>
+    request('POST', '/admin/qa', { question, top_k: topK, score_threshold: scoreThreshold }),
+
   async ingestUrl(url, title, siteName) {
     const fd = new FormData()
     fd.append('url', url)
