@@ -154,7 +154,49 @@ dokku run postharvest-api poetry run python scripts/init_db.py
 
 ---
 
-## 8. WhatsApp setup (Meta Cloud API)
+## 8. Admin panel
+
+The admin panel is part of the `postharvest-chat` frontend app — no new Dokku app or Docker container is needed. It is accessible at `https://chat.yourdomain.com/admin`.
+
+### Create admin credentials
+
+Generate a strong password and a random JWT secret:
+
+```bash
+openssl rand -hex 32   # use this output as ADMIN_JWT_SECRET
+```
+
+Set the variables on the **API** app (credentials are validated by the API, not baked into the frontend):
+
+```bash
+dokku config:set postharvest-api \
+  ADMIN_USERNAME=admin \
+  ADMIN_PASSWORD=<strong-password> \
+  ADMIN_JWT_SECRET=<openssl rand -hex 32 output>
+```
+
+Then restart the API container to apply:
+
+```bash
+dokku ps:restart postharvest-api
+```
+
+> **No frontend rebuild needed.** `ADMIN_*` vars are backend-only. The frontend just receives a JWT from the API at login time.
+
+### Changing credentials later
+
+Update the vars and restart the API:
+
+```bash
+dokku config:set postharvest-api ADMIN_PASSWORD=<new-password>
+dokku ps:restart postharvest-api
+```
+
+Active sessions remain valid until their 8-hour JWT expires. Close the browser to invalidate immediately (tokens are stored in `sessionStorage`).
+
+---
+
+## 9. WhatsApp setup (Meta Cloud API)
 
 ### Create a Meta app
 

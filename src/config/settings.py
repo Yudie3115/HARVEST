@@ -90,9 +90,10 @@ class Settings(BaseSettings):
     log_rotation: str = Field(default="10 MB")
     log_retention: str = Field(default="30 days")
     
-    # Streamlit
-    streamlit_server_port: int = Field(default=8501)
-    streamlit_server_address: str = Field(default="0.0.0.0")
+    # Admin panel
+    admin_username: str = Field(default="admin")
+    admin_password: str = Field(default="changeme")
+    admin_jwt_secret: str = Field(default="change-this-secret-in-production")
 
     # Translation (Sunbird AI)
     sunbird_api_key: str = Field(default="")

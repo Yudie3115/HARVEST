@@ -63,9 +63,14 @@ postharvest-frontend      Up
 
 ```bash
 cp .env.example .env
-# Edit .env and add your OpenAI key:
+# Edit .env and add your OpenAI key and admin credentials:
 # OPENAI_API_KEY=sk-...
+# ADMIN_USERNAME=admin
+# ADMIN_PASSWORD=<strong-password>
+# ADMIN_JWT_SECRET=<output of: openssl rand -hex 32>
 ```
+
+The admin panel is available at **http://localhost:5173/admin** once the stack is running. Log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
 **Optional: Translation (Ugandan local languages)**
 
