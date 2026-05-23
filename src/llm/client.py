@@ -77,7 +77,7 @@ class LLMClient:
                     "model": self.model,
                     "messages": messages,
                     "temperature": temperature or self.temperature,
-                    "max_tokens": max_tokens or settings.openai_max_tokens,
+                    "max_completion_tokens": max_tokens or settings.openai_max_tokens,
                 }
                 
                 if response_format == "json":
@@ -403,7 +403,7 @@ Summary:"""
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": "test"}],
-                    max_tokens=5
+                    max_completion_tokens=5
                 )
                 logger.info(f"Connected to OpenAI with model {self.model}")
                 return True
