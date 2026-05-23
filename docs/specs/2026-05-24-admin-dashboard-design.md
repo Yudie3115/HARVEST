@@ -59,7 +59,7 @@ All routes under `/admin` prefix. A `require_admin` FastAPI dependency validates
 | `GET` | `/admin/config` | Read-only current settings snapshot |
 | `POST` | `/admin/crawl/full` | Trigger Prefect full crawl deployment |
 | `POST` | `/admin/crawl/incremental` | Trigger Prefect incremental update |
-| `POST` | `/admin/documents/ingest` | File or URL ingestion |
+| `POST` | `/admin/documents/ingest` | File ingestion (`multipart/form-data`) or URL ingestion (JSON body with `url` field) |
 
 ---
 
@@ -69,6 +69,7 @@ All routes under `/admin` prefix. A `require_admin` FastAPI dependency validates
 
 - shadcn/ui is installed into the existing `frontend/` project via its CLI
 - Admin components use shadcn primitives: Card, Table, Badge, Button, Input, Select, Tabs, Dialog, Accordion, Progress, Alert
+- `react-dropzone` used for the drag-and-drop file upload zone in Add Document
 - The chat UI remains untouched — it uses inline styles and does not use shadcn
 
 ---
@@ -164,7 +165,7 @@ New **"Admin Panel"** section:
 - Admin UI is at `/admin` on the `postharvest-chat` app — no new Dokku app needed
 - Creating admin credentials: `dokku config:set postharvest-chat ADMIN_USERNAME=admin ADMIN_PASSWORD=... ADMIN_JWT_SECRET=...`
 - Generate JWT secret: `openssl rand -hex 32`
-- Frontend rebuild required after changing credentials (Vite bakes `VITE_*` vars at compile time; `ADMIN_*` vars are backend-only and injected at runtime via the API — no rebuild needed for credential changes)
+- `ADMIN_*` vars are backend-only (validated by the API, not baked into the frontend bundle) — changing them requires an API container restart (`dokku ps:restart postharvest-api`), not a frontend rebuild
 
 ### `QUICKSTART.md`
 
