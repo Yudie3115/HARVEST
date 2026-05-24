@@ -8,6 +8,8 @@ class SourceRef(BaseModel):
     title: str | None
     url: str | None
     site_name: str | None
+    score: float | None = None
+    snippet: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -20,6 +22,7 @@ class ChatResponse(BaseModel):
     detected_language: str
     sources: list[SourceRef]
     session_id: str
+    no_results: bool = False
 
 
 class HistoryMessage(BaseModel):

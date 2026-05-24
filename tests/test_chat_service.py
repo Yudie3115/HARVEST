@@ -1,8 +1,8 @@
 """
-Unit tests for process_chat — verifying history is passed to answer_question.
+Unit tests for process_chat — verifying history, score threshold, enriched sources, no-results.
 """
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import pytest
 
 
@@ -152,3 +152,77 @@ def test_empty_history_when_no_prior_messages(mocks):
     # None or empty list are both acceptable — no crash is what matters
     assert history is None or history == []
     assert result.answer == "Post-harvest loss is crop lost after harvest."
+
+
+def test_score_threshold_passed_to_search(mocks):
+    """The vector DB search must use settings.chat_score_threshold."""
+    from src.api.services.chat_service import process_chat
+
+    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.35
+        mock_settings.bertscore_enabled = False
+        process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    call_kwargs = mocks["vector_db"].search.call_args.kwargs
+    assert call_kwargs.get("score_threshold") == 0.35
+
+
+def test_sources_include_score_and_snippet(mocks):
+    """Each returned SourceRef must include score and snippet from the search hit."""
+    from src.api.services.chat_service import process_chat
+
+    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.0
+        mock_settings.bertscore_enabled = False
+        result = process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    assert len(result.sources) == 1
+    src = result.sources[0]
+    assert src.score == 0.9
+    assert src.snippet == "Post-harvest loss refers to losses after harvest."
+
+
+def test_no_results_skips_llm_and_sets_flag(mocks):
+    """When no chunks pass the threshold, LLM is not called and no_results=True."""
+    from src.api.services.chat_service import process_chat
+
+    mocks["vector_db"].search.return_value = []
+    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.3
+        mock_settings.bertscore_enabled = False
+        result = process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    mocks["llm"].answer_question.assert_not_called()
+    assert result.no_results is True
+    assert "couldn't find" in result.answer.lower()

@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = Field(default="")
     whatsapp_app_secret: str = Field(default="")
 
+    # Chat retrieval
+    chat_score_threshold: float = Field(default=0.3)
+
     # API
     api_rate_limit_web: int = Field(default=20)       # requests per hour per IP
     api_rate_limit_whatsapp: int = Field(default=30)  # messages per hour per phone
