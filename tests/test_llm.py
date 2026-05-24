@@ -6,6 +6,64 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 
+class TestLLMClientStreaming:
+    """Tests for stream_answer() generator"""
+
+    def _make_client_and_mock(self, tokens: list):
+        mock_openai = MagicMock()
+        chunks = [
+            MagicMock(choices=[MagicMock(delta=MagicMock(content=t))])
+            for t in tokens
+        ]
+        # Final chunk with content=None (OpenAI end-of-stream marker)
+        chunks.append(MagicMock(choices=[MagicMock(delta=MagicMock(content=None))]))
+        mock_openai.chat.completions.create.return_value = iter(chunks)
+
+        with patch("src.llm.client.settings") as s:
+            s.openai_api_key = "sk-test"
+            s.llm_provider = "openai"
+            s.openai_model = "gpt-4o-mini"
+            s.openai_temperature = 0.1
+            s.openai_max_tokens = 8192
+            s.relevance_threshold = 6.0
+            with patch("openai.OpenAI", return_value=mock_openai):
+                from src.llm.client import LLMClient
+                return LLMClient(provider="openai"), mock_openai
+
+    def test_stream_answer_yields_tokens(self):
+        tokens = ["Hello", " world", "!"]
+        client, mock_api = self._make_client_and_mock(tokens)
+        chunks = [{"text": "Some content.", "source_url": "https://naro.go.ug/guide.pdf"}]
+
+        result = list(client.stream_answer("What is storage?", chunks=chunks))
+
+        call_kwargs = mock_api.chat.completions.create.call_args.kwargs
+        assert call_kwargs.get("stream") is True
+        assert result == ["Hello", " world", "!"]
+
+    def test_stream_answer_with_history_includes_prior_turns(self):
+        client, mock_api = self._make_client_and_mock(["answer"])
+        history = [
+            {"role": "user", "content": "prior question"},
+            {"role": "assistant", "content": "prior answer"},
+        ]
+        chunks = [{"text": "Content.", "source_url": "https://naro.go.ug/guide.pdf"}]
+
+        list(client.stream_answer("follow up?", chunks=chunks, history=history))
+
+        call_kwargs = mock_api.chat.completions.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        roles = [m["role"] for m in messages]
+        assert roles == ["system", "user", "assistant", "user"]
+
+    def test_stream_answer_skips_none_deltas(self):
+        client, _ = self._make_client_and_mock(["a", "b"])
+        chunks = [{"text": "Content.", "source_url": "https://naro.go.ug/guide.pdf"}]
+        result = list(client.stream_answer("q", chunks=chunks))
+        assert None not in result
+        assert result == ["a", "b"]
+
+
 class TestLLMClientHistory:
     """Tests for history-aware LLM generation"""
 

@@ -2,7 +2,7 @@
 Unified LLM client supporting OpenAI (primary) and Ollama (fallback)
 """
 import json
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -417,6 +417,59 @@ Summary:"""
             max_tokens=max_tokens,
             history=history,
         )
+
+    def stream_answer(
+        self,
+        question: str,
+        chunks: List[Dict],
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Generator[str, None, None]:
+        """
+        Stream answer tokens for a RAG question. Yields one string per token.
+        Does not use @retry — retrying a half-consumed stream is unsafe.
+        """
+        from src.llm.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
+        prompt = build_qa_prompt(question, chunks)
+
+        messages = []
+        if QA_SYSTEM_PROMPT:
+            messages.append({"role": "system", "content": QA_SYSTEM_PROMPT})
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            if self.provider == "openai":
+                stream = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_completion_tokens=1024,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content
+                    if delta is not None:
+                        yield delta
+
+            else:  # ollama
+                stream = self.client.chat(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    options={
+                        "temperature": self.temperature,
+                        "num_predict": 1024,
+                    },
+                )
+                for chunk in stream:
+                    delta = chunk.message.content
+                    if delta:
+                        yield delta
+
+        except Exception as exc:
+            logger.error(f"LLM streaming error ({self.provider}): {exc}")
+            raise
 
     def check_connection(self) -> bool:
         """Check if LLM service is accessible"""
