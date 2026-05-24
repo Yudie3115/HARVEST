@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from src.api.models.requests import ChatRequest
 from src.api.models.responses import ChatResponse, SourceRef
 from src.config.settings import settings
-from src.llm.client import LLMClient
+from src.llm.client import LLMClient, LLMContextTooLargeError
 from src.llm.embeddings import EmbeddingClient
 from src.storage.models import ChatMessage, ChatSession, MessageRoleEnum
 from src.storage.vector_db import VectorDBClient
@@ -25,6 +25,11 @@ _HISTORY_SEND_WINDOW = 6
 _NO_RESULTS_ANSWER = (
     "I couldn't find relevant information in the knowledge base for this question. "
     "Try rephrasing, or ask about post-harvest storage, drying, pest control, or handling practices."
+)
+
+_CONTEXT_TOO_LARGE_ANSWER = (
+    "This conversation has grown too long for the current model to handle. "
+    "Please start a new chat, or switch to GPT-4o Mini which supports longer conversations."
 )
 
 
@@ -118,7 +123,7 @@ def process_chat(
     query_vector = embedding_client.embed(english_message)
     search_results = vector_db_client.search(
         query_vector=query_vector,
-        top_k=10,
+        top_k=5,
         score_threshold=settings.chat_score_threshold,
     )
 
@@ -169,18 +174,27 @@ def process_chat(
     # 6. Build conversation history for multi-turn context
     # ------------------------------------------------------------------
     history_turns = [
-        {"role": msg.role.value if hasattr(msg.role, "value") else msg.role, "content": msg.content}
+        {
+            "role": msg.role.value if hasattr(msg.role, "value") else msg.role,
+            "content": (msg.english_content or msg.content)
+            if (msg.role.value if hasattr(msg.role, "value") else msg.role) == "assistant"
+            else msg.content,
+        }
         for msg in recent_messages[-_HISTORY_SEND_WINDOW:]
     ] or None
 
     # ------------------------------------------------------------------
     # 7. Synthesise answer
     # ------------------------------------------------------------------
-    english_answer = llm_client.answer_question(
-        question=english_message,
-        chunks=chunks,
-        history=history_turns,
-    )
+    try:
+        english_answer = llm_client.answer_question(
+            question=english_message,
+            chunks=chunks,
+            history=history_turns,
+        )
+    except LLMContextTooLargeError:
+        logger.warning(f"Context too large for session {request.session_id}")
+        raise
 
     # ------------------------------------------------------------------
     # 8. Translate answer back if needed
@@ -239,6 +253,7 @@ def process_chat(
         session_id=session_uuid,
         role=MessageRoleEnum.assistant,
         content=final_answer,
+        english_content=english_answer if detected_language != "eng" else None,
         detected_language=detected_language,
         sources=sources_dicts,
     )
@@ -338,7 +353,7 @@ def process_chat_stream(
         query_vector = embedding_client.embed(english_message)
         search_results = vector_db_client.search(
             query_vector=query_vector,
-            top_k=10,
+            top_k=5,
             score_threshold=settings.chat_score_threshold,
         )
 
@@ -353,9 +368,15 @@ def process_chat_stream(
             if hit.get("payload", {}).get("text")
         ]
 
-        # History turns
+        # History turns — use English content for assistant messages to avoid
+        # tokenization overhead from non-Latin scripts in history
         history_turns = [
-            {"role": msg.role.value if hasattr(msg.role, "value") else msg.role, "content": msg.content}
+            {
+                "role": msg.role.value if hasattr(msg.role, "value") else msg.role,
+                "content": (msg.english_content or msg.content)
+                if (msg.role.value if hasattr(msg.role, "value") else msg.role) == "assistant"
+                else msg.content,
+            }
             for msg in recent_messages[-_HISTORY_SEND_WINDOW:]
         ] or None
 
@@ -425,7 +446,9 @@ def process_chat_stream(
         )
         assistant_msg = ChatMessage(
             session_id=session_uuid, role=MessageRoleEnum.assistant,
-            content=final_answer, detected_language=detected_language, sources=sources_dicts,
+            content=final_answer,
+            english_content=full_english_response if detected_language != "eng" else None,
+            detected_language=detected_language, sources=sources_dicts,
         )
         db.add(user_msg)
         db.add(assistant_msg)
@@ -451,6 +474,9 @@ def process_chat_stream(
 
         yield f"data: {_json.dumps({'type': 'done', 'answer': final_answer, 'sources': sources_dicts, 'detected_language': detected_language, 'no_results': False, 'session_id': request.session_id})}\n\n"
 
+    except LLMContextTooLargeError:
+        logger.warning(f"Context too large for session {request.session_id}")
+        yield f"data: {_json.dumps({'type': 'error', 'message': _CONTEXT_TOO_LARGE_ANSWER})}\n\n"
     except Exception as exc:
         logger.error(f"Streaming chat error for session {request.session_id}: {exc}")
         yield f"data: {_json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"

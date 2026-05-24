@@ -1,6 +1,7 @@
 import ModelPicker from './ModelPicker'
 
-const LANGUAGE_NAMES = {
+const LANGUAGES = {
+  '': 'Auto-detect',
   eng: 'English',
   lug: 'Luganda',
   ach: 'Acholi',
@@ -10,9 +11,7 @@ const LANGUAGE_NAMES = {
 }
 
 export default function LanguageBar({ detectedLanguage, languageOverride, onOverride, modelPreference, onModelChange }) {
-  const active = languageOverride || detectedLanguage || 'eng'
-  const displayName = LANGUAGE_NAMES[active] || 'English'
-  const isOverride = !!languageOverride
+  const detectedName = LANGUAGES[detectedLanguage] || 'English'
 
   return (
     <div
@@ -46,29 +45,31 @@ export default function LanguageBar({ detectedLanguage, languageOverride, onOver
             color: '#6a7d69',
           }}
         >
-          Responding in{' '}
-          <span style={{ color: '#d4a853' }}>{displayName}</span>
-          {!isOverride && (
-            <span style={{ color: '#3d5a3d' }}> · auto-detected</span>
-          )}
+          Responding in
         </span>
-        {isOverride && (
-          <button
-            onClick={() => onOverride(null)}
-            style={{
-              fontSize: 11,
-              fontFamily: '"IBM Plex Mono", monospace',
-              color: '#4a7c59',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-              textDecoration: 'underline',
-            }}
-          >
-            · clear
-          </button>
-        )}
+        <select
+          value={languageOverride || ''}
+          onChange={(e) => onOverride(e.target.value || null)}
+          style={{
+            background: '#161c17',
+            border: '1px solid #2a3329',
+            color: '#d4a853',
+            fontSize: 11,
+            borderRadius: 6,
+            padding: '2px 20px 2px 6px',
+            fontFamily: '"IBM Plex Mono", monospace',
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          {Object.entries(LANGUAGES).map(([code, name]) => (
+            <option key={code} value={code}>
+              {code === '' && detectedLanguage
+                ? `Auto (${detectedName})`
+                : name}
+            </option>
+          ))}
+        </select>
       </div>
       <ModelPicker modelPreference={modelPreference} onModelChange={onModelChange} />
     </div>

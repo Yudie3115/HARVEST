@@ -21,6 +21,7 @@ from src.api.dependencies import (
 )
 from src.api.models.requests import ChatRequest
 from src.api.services.chat_service import process_chat
+from src.llm.client import LLMContextTooLargeError
 from src.api.services.whatsapp_service import WhatsAppService
 from src.config.settings import settings
 from src.llm.client import LLMClient
@@ -244,6 +245,17 @@ async def whatsapp_webhook(
         except Exception:
             pass
         return {"status": "timeout"}
+    except LLMContextTooLargeError:
+        logger.warning(f"Context too large for WhatsApp session {sender_phone}")
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "This conversation has become too long for me to process. "
+                "Please send your question again as a new message.",
+            )
+        except Exception:
+            pass
+        return {"status": "context_too_large"}
     except Exception as exc:
         logger.error(f"WhatsApp RAG pipeline error for {sender_phone}: {exc}")
         try:

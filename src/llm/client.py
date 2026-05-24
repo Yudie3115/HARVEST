@@ -4,10 +4,14 @@ Unified LLM client supporting OpenAI (primary) and Ollama (fallback)
 import json
 from typing import Dict, Generator, List, Optional
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from src.config.settings import settings
 from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_CROPS
+
+
+class LLMContextTooLargeError(Exception):
+    """Raised when the LLM rejects a request because the token count exceeds its limit."""
 
 
 class LLMClient:
@@ -70,7 +74,8 @@ class LLMClient:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_not_exception_type(LLMContextTooLargeError),
     )
     def _generate(
         self,
@@ -134,6 +139,13 @@ class LLMClient:
                     return response['response']
 
         except Exception as e:
+            if self.provider in ("openai", "groq"):
+                try:
+                    from openai import APIStatusError
+                    if isinstance(e, APIStatusError) and e.status_code == 413:
+                        raise LLMContextTooLargeError(str(e)) from e
+                except ImportError:
+                    pass
             logger.error(f"LLM generation error ({self.provider}): {e}")
             raise
     
@@ -483,6 +495,13 @@ Summary:"""
                         yield delta
 
         except Exception as exc:
+            if self.provider in ("openai", "groq"):
+                try:
+                    from openai import APIStatusError
+                    if isinstance(exc, APIStatusError) and exc.status_code == 413:
+                        raise LLMContextTooLargeError(str(exc)) from exc
+                except ImportError:
+                    pass
             logger.error(f"LLM streaming error ({self.provider}): {exc}")
             raise
 

@@ -145,6 +145,9 @@ Question: {question}
 Provide a clear, structured answer. Cite source numbers inline (e.g. [1]). If the answer spans multiple sources, cite each one where it is relevant."""
 
 
+_CHUNK_MAX_CHARS = 300
+
+
 def build_qa_prompt(question: str, chunks: list) -> str:
     """
     Build a RAG prompt from a question and retrieved chunks.
@@ -154,8 +157,11 @@ def build_qa_prompt(question: str, chunks: list) -> str:
     """
     context_parts = []
     for i, chunk in enumerate(chunks, 1):
+        text = chunk["text"]
+        if len(text) > _CHUNK_MAX_CHARS:
+            text = text[:_CHUNK_MAX_CHARS] + "…"
         context_parts.append(
-            f"[{i}] Source: {chunk.get('source_url', 'Unknown')}\n{chunk['text']}"
+            f"[{i}] Source: {chunk.get('source_url', 'Unknown')}\n{text}"
         )
     context = "\n\n---\n\n".join(context_parts)
     return QA_ANSWER_TEMPLATE.format(context=context, question=question)

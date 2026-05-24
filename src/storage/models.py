@@ -309,6 +309,7 @@ class ChatMessage(Base):
     )
     role = Column(SQLEnum(MessageRoleEnum), nullable=False)
     content = Column(Text, nullable=False)
+    english_content = Column(Text, nullable=True)  # English version of assistant replies, used for LLM history
     detected_language = Column(String, nullable=True)  # e.g. "eng", "lug"
     sources = Column(JSONB, nullable=True)  # [{title, url, site_name}]
     bert_score = Column(JSONB, nullable=True)  # {precision, recall, f1, model, scored_at}
