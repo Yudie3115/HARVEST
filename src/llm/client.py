@@ -64,6 +64,7 @@ class LLMClient:
         response_format: str = "json",
         temperature: float = None,
         max_tokens: int = None,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Generate response from LLM with retry logic"""
         try:
@@ -71,33 +72,52 @@ class LLMClient:
                 messages = []
                 if system_prompt:
                     messages.append({"role": "system", "content": system_prompt})
+                if history:
+                    messages.extend(history)
                 messages.append({"role": "user", "content": prompt})
-                
+
                 kwargs = {
                     "model": self.model,
                     "messages": messages,
                     "temperature": temperature or self.temperature,
                     "max_completion_tokens": max_tokens or settings.openai_max_tokens,
                 }
-                
+
                 if response_format == "json":
                     kwargs["response_format"] = {"type": "json_object"}
-                
+
                 response = self.client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content
-                
+
             else:  # ollama
-                response = self.client.generate(
-                    model=self.model,
-                    prompt=prompt,
-                    format=response_format if response_format == "json" else "",
-                    options={
-                        "temperature": temperature or self.temperature,
-                        "num_predict": max_tokens or settings.ollama_max_tokens,
-                    },
-                )
-                return response['response']
-                
+                if history:
+                    # ollama.generate() is single-turn; use chat() for multi-turn
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.extend(history)
+                    messages.append({"role": "user", "content": prompt})
+                    response = self.client.chat(
+                        model=self.model,
+                        messages=messages,
+                        options={
+                            "temperature": temperature or self.temperature,
+                            "num_predict": max_tokens or settings.ollama_max_tokens,
+                        },
+                    )
+                    return response.message.content
+                else:
+                    response = self.client.generate(
+                        model=self.model,
+                        prompt=prompt,
+                        format=response_format if response_format == "json" else "",
+                        options={
+                            "temperature": temperature or self.temperature,
+                            "num_predict": max_tokens or settings.ollama_max_tokens,
+                        },
+                    )
+                    return response['response']
+
         except Exception as e:
             logger.error(f"LLM generation error ({self.provider}): {e}")
             raise
@@ -381,9 +401,11 @@ Summary:"""
         question: str,
         chunks: List[Dict],
         max_tokens: int = 1024,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
         RAG answer synthesis. chunks contain 'text' and 'source_url'.
+        history: optional prior turns [{"role": "user"/"assistant", "content": "..."}]
         Returns the LLM's answer string (may include [1]-style citations).
         """
         from src.llm.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
@@ -393,6 +415,7 @@ Summary:"""
             system_prompt=QA_SYSTEM_PROMPT,
             response_format="",
             max_tokens=max_tokens,
+            history=history,
         )
 
     def check_connection(self) -> bool:

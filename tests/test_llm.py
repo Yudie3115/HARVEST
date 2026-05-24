@@ -6,6 +6,79 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 
+class TestLLMClientHistory:
+    """Tests for history-aware LLM generation"""
+
+    def _make_client_and_mock(self, response_content: str):
+        mock_openai = MagicMock()
+        mock_openai.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content=response_content))]
+        )
+        with patch("src.llm.client.settings") as s:
+            s.openai_api_key = "sk-test"
+            s.llm_provider = "openai"
+            s.openai_model = "gpt-4o-mini"
+            s.openai_temperature = 0.1
+            s.openai_max_tokens = 8192
+            s.relevance_threshold = 6.0
+            with patch("openai.OpenAI", return_value=mock_openai):
+                from src.llm.client import LLMClient
+                return LLMClient(provider="openai"), mock_openai
+
+    def test_generate_without_history_sends_two_messages(self):
+        client, mock_api = self._make_client_and_mock("hello")
+        client._generate("my question", system_prompt="sys", response_format="")
+        call_args = mock_api.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "my question"
+
+    def test_generate_with_history_inserts_turns_before_current(self):
+        client, mock_api = self._make_client_and_mock("follow-up answer")
+        history = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+        ]
+        client._generate("second question", system_prompt="sys", response_format="", history=history)
+        call_args = mock_api.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        # system + 2 history + current user
+        assert len(messages) == 4
+        assert messages[0]["role"] == "system"
+        assert messages[1] == {"role": "user", "content": "first question"}
+        assert messages[2] == {"role": "assistant", "content": "first answer"}
+        assert messages[3]["role"] == "user"
+        assert messages[3]["content"] == "second question"
+
+    def test_answer_question_with_history_passes_history_to_generate(self):
+        client, mock_api = self._make_client_and_mock("answer with history")
+        history = [
+            {"role": "user", "content": "what is drying?"},
+            {"role": "assistant", "content": "Drying reduces moisture content."},
+        ]
+        chunks = [{"text": "Maize should be dried below 13.5%.", "source_url": "https://naro.go.ug/guide.pdf"}]
+        result = client.answer_question("What temperature?", chunks=chunks, history=history)
+        assert result == "answer with history"
+        call_args = mock_api.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        roles = [m["role"] for m in messages]
+        # system, user (drying?), assistant (drying answer), user (current)
+        assert roles == ["system", "user", "assistant", "user"]
+
+    def test_answer_question_without_history_unchanged(self):
+        client, mock_api = self._make_client_and_mock("normal answer")
+        chunks = [{"text": "Store in hermetic bags.", "source_url": "https://naro.go.ug/guide.pdf"}]
+        result = client.answer_question("How to store?", chunks=chunks)
+        assert result == "normal answer"
+        call_args = mock_api.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+
+
 # ---------------------------------------------------------------------------
 # LLM Client
 # ---------------------------------------------------------------------------
