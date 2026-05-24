@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { sendMessage } from '../api'
+import { useState, useCallback, useEffect } from 'react'
+import { getHistory, streamMessage } from '../api'
 
 const WELCOME = {
   id: 'welcome',
@@ -16,6 +16,31 @@ export function useChat(sessionId) {
   const [detectedLanguage, setDetectedLanguage] = useState('eng')
   const [languageOverride, setLanguageOverride] = useState(null)
 
+  // Reload message history when sessionId becomes available (e.g. page refresh)
+  useEffect(() => {
+    if (!sessionId) return
+    getHistory(sessionId)
+      .then((data) => {
+        if (!data.messages?.length) return
+        const loaded = data.messages.map((msg, i) => ({
+          id: `h-${i}`,
+          role: msg.role,
+          content: msg.content,
+          detectedLanguage: msg.detected_language,
+          sources: msg.sources || [],
+        }))
+        setMessages([WELCOME, ...loaded])
+        // Restore detected language from the most recent assistant message
+        const lastAssistant = [...loaded].reverse().find((m) => m.role === 'assistant')
+        if (lastAssistant?.detectedLanguage) {
+          setDetectedLanguage(lastAssistant.detectedLanguage)
+        }
+      })
+      .catch(() => {
+        // History load failure is non-fatal — keep welcome message
+      })
+  }, [sessionId])
+
   const send = useCallback(
     async (text) => {
       if (!sessionId || !text.trim() || isLoading) return
@@ -26,37 +51,52 @@ export function useChat(sessionId) {
         content: text.trim(),
         sources: [],
       }
-      setMessages((prev) => [...prev, userMsg])
+      const assistantMsgId = `a-${Date.now()}`
+
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        { id: assistantMsgId, role: 'assistant', content: '', sources: [], isStreaming: true },
+      ])
       setIsLoading(true)
 
-      try {
-        const data = await sendMessage(sessionId, text.trim(), languageOverride)
-        setDetectedLanguage(data.detected_language || 'eng')
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: 'assistant',
-            content: data.answer,
-            detectedLanguage: data.detected_language,
-            sources: data.sources || [],
-          },
-        ])
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `e-${Date.now()}`,
-            role: 'assistant',
-            content: 'Sorry, something went wrong. Please try again.',
-            detectedLanguage: 'eng',
-            sources: [],
-            isError: true,
-          },
-        ])
-      } finally {
-        setIsLoading(false)
-      }
+      await streamMessage(sessionId, text.trim(), languageOverride, {
+        onToken: (token) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + token } : m
+            )
+          )
+        },
+        onDone: (event) => {
+          setDetectedLanguage(event.detected_language || 'eng')
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    // Replace streamed English tokens with the (potentially translated) final answer
+                    content: event.answer || m.content,
+                    sources: event.sources || [],
+                    isStreaming: false,
+                    noResults: event.no_results || false,
+                  }
+                : m
+            )
+          )
+          setIsLoading(false)
+        },
+        onError: (message) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: message, isError: true, isStreaming: false }
+                : m
+            )
+          )
+          setIsLoading(false)
+        },
+      })
     },
     [sessionId, isLoading, languageOverride]
   )
