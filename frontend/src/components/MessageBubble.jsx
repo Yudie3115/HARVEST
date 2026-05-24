@@ -119,9 +119,9 @@ export default function MessageBubble({ message, onShowSources }) {
           style={{
             padding: '11px 16px',
             borderRadius: '4px 16px 16px 16px',
-            background: message.isError ? '#1f1414' : '#191f1a',
-            border: `1px solid ${message.isError ? '#3d2020' : '#252e25'}`,
-            color: message.isError ? '#c97d7d' : '#d4cfc6',
+            background: message.isError ? '#1f1414' : message.noResults ? '#161a16' : '#191f1a',
+            border: `1px solid ${message.isError ? '#3d2020' : message.noResults ? '#202820' : '#252e25'}`,
+            color: message.isError ? '#c97d7d' : message.noResults ? '#6a7a6a' : '#d4cfc6',
             fontSize: 15,
             lineHeight: 1.6,
             fontFamily: 'Outfit, system-ui, sans-serif',

@@ -19,7 +19,7 @@ function SourceCard({ source, index }) {
         gap: 6,
       }}
     >
-      {/* Index + site badge row */}
+      {/* Index + site badge + score row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span
           style={{
@@ -46,6 +46,18 @@ function SourceCard({ source, index }) {
             }}
           >
             {siteName}
+          </span>
+        )}
+        {source.score != null && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              fontFamily: '"IBM Plex Mono", monospace',
+              color: '#5a7a5a',
+            }}
+          >
+            {(source.score * 100).toFixed(0)}%
           </span>
         )}
       </div>
@@ -80,6 +92,26 @@ function SourceCard({ source, index }) {
           title={source.url}
         >
           {displayUrl}
+        </p>
+      )}
+
+      {/* Snippet */}
+      {source.snippet && (
+        <p
+          style={{
+            margin: 0,
+            fontSize: 12,
+            fontFamily: 'Outfit, system-ui, sans-serif',
+            color: '#6a7a6a',
+            lineHeight: 1.5,
+            fontStyle: 'italic',
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {source.snippet}
         </p>
       )}
 

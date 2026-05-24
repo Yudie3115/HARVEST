@@ -24,7 +24,7 @@ export default function App() {
         overflow: 'hidden',
       }}
     >
-      <Header languageOverride={languageOverride} onLanguageChange={setLanguageOverride} />
+      <Header />
       <ChatWindow
         messages={messages}
         isLoading={isLoading || sessionLoading}
