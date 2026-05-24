@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI):
 
     app.state.postgres_client = postgres_client
     app.state.llm_client = LLMClient()
+    if settings.groq_api_key:
+        app.state.llm_client_groq = LLMClient(provider="groq")
+    if settings.openai_api_key:
+        app.state.llm_client_openai = LLMClient(provider="openai")
     app.state.embedding_client = EmbeddingClient()
     app.state.vector_db_client = VectorDBClient()
     app.state.translation_client = TranslationClient()

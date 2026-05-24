@@ -41,11 +41,17 @@ async def chat(
     translation_client: TranslationClient = Depends(get_translation_client),
 ) -> ChatResponse:
     """Process a user message and return an AI-generated answer with sources."""
+    if body.model_preference == "groq" and hasattr(request.app.state, "llm_client_groq"):
+        active_llm = request.app.state.llm_client_groq
+    elif body.model_preference == "openai" and hasattr(request.app.state, "llm_client_openai"):
+        active_llm = request.app.state.llm_client_openai
+    else:
+        active_llm = llm_client
     try:
         return process_chat(
             request=body,
             db=db,
-            llm_client=llm_client,
+            llm_client=active_llm,
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
@@ -71,11 +77,18 @@ async def chat_stream(
     translation_client: TranslationClient = Depends(get_translation_client),
 ):
     """Stream a chat response as Server-Sent Events."""
+    if body.model_preference == "groq" and hasattr(request.app.state, "llm_client_groq"):
+        active_llm = request.app.state.llm_client_groq
+    elif body.model_preference == "openai" and hasattr(request.app.state, "llm_client_openai"):
+        active_llm = request.app.state.llm_client_openai
+    else:
+        active_llm = llm_client
+
     def _generate():
         yield from process_chat_stream(
             request=body,
             db=db,
-            llm_client=llm_client,
+            llm_client=active_llm,
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,

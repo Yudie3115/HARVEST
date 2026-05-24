@@ -25,6 +25,9 @@ class LLMClient:
             if provider == "openai" and not settings.openai_api_key:
                 logger.warning("OpenAI API key not found, falling back to Ollama")
                 provider = "ollama"
+            elif provider == "groq" and not settings.groq_api_key:
+                logger.warning("Groq API key not found, falling back to Ollama")
+                provider = "ollama"
         
         self.provider = provider
         self.temperature = temperature
@@ -33,12 +36,24 @@ class LLMClient:
             from openai import OpenAI
             if not settings.openai_api_key:
                 raise ValueError("OpenAI API key required but not found in settings")
-            
+
             self.client = OpenAI(api_key=settings.openai_api_key)
             self.model = model or settings.openai_model
             self.temperature = temperature or settings.openai_temperature
             logger.info(f"Initialized OpenAI client with model {self.model}")
-            
+
+        elif self.provider == "groq":
+            from openai import OpenAI
+            if not settings.groq_api_key:
+                raise ValueError("Groq API key required but not found in settings")
+            self.client = OpenAI(
+                api_key=settings.groq_api_key,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            self.model = model or settings.groq_model
+            self.temperature = temperature or settings.groq_temperature
+            logger.info(f"Initialized Groq client with model {self.model}")
+
         elif self.provider == "ollama":
             try:
                 import ollama
@@ -68,7 +83,7 @@ class LLMClient:
     ) -> str:
         """Generate response from LLM with retry logic"""
         try:
-            if self.provider == "openai":
+            if self.provider in ("openai", "groq"):
                 messages = []
                 if system_prompt:
                     messages.append({"role": "system", "content": system_prompt})
@@ -439,7 +454,7 @@ Summary:"""
         messages.append({"role": "user", "content": prompt})
 
         try:
-            if self.provider == "openai":
+            if self.provider in ("openai", "groq"):
                 stream = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -474,14 +489,14 @@ Summary:"""
     def check_connection(self) -> bool:
         """Check if LLM service is accessible"""
         try:
-            if self.provider == "openai":
-                # Simple test request
-                response = self.client.chat.completions.create(
+            if self.provider in ("openai", "groq"):
+                # Simple test request — works for both since Groq uses the OpenAI SDK
+                self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": "test"}],
-                    max_completion_tokens=5
+                    max_completion_tokens=5,
                 )
-                logger.info(f"Connected to OpenAI with model {self.model}")
+                logger.info(f"Connected to {self.provider} with model {self.model}")
                 return True
             else:  # ollama
                 tags = self.client.list()

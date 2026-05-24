@@ -36,8 +36,13 @@ class Settings(BaseSettings):
     qdrant_collection: str = Field(default="postharvest_knowledge")
     
     # LLM Provider Configuration
-    llm_provider: Literal["openai", "ollama"] = Field(default="openai")
-    
+    llm_provider: Literal["openai", "ollama", "groq"] = Field(default="openai")
+
+    # Groq
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
+    groq_temperature: float = Field(default=0.1)
+
     # OpenAI
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o-mini")

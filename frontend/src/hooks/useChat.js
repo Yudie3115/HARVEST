@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from 'react'
 import { getHistory, streamMessage } from '../api'
 
+const MODEL_STORAGE_KEY = 'phk_model_preference'
+
 const WELCOME = {
   id: 'welcome',
   role: 'assistant',
@@ -15,6 +17,14 @@ export function useChat(sessionId) {
   const [isLoading, setIsLoading] = useState(false)
   const [detectedLanguage, setDetectedLanguage] = useState('eng')
   const [languageOverride, setLanguageOverride] = useState(null)
+  const [modelPreference, setModelPreferenceState] = useState(
+    () => localStorage.getItem(MODEL_STORAGE_KEY) || 'groq'
+  )
+
+  const setModelPreference = useCallback((value) => {
+    localStorage.setItem(MODEL_STORAGE_KEY, value)
+    setModelPreferenceState(value)
+  }, [])
 
   // Reload message history when sessionId becomes available (e.g. page refresh)
   useEffect(() => {
@@ -60,7 +70,7 @@ export function useChat(sessionId) {
       ])
       setIsLoading(true)
 
-      await streamMessage(sessionId, text.trim(), languageOverride, {
+      await streamMessage(sessionId, text.trim(), languageOverride, modelPreference, {
         onToken: (token) => {
           setMessages((prev) =>
             prev.map((m) =>
@@ -98,8 +108,8 @@ export function useChat(sessionId) {
         },
       })
     },
-    [sessionId, isLoading, languageOverride]
+    [sessionId, isLoading, languageOverride, modelPreference]
   )
 
-  return { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, send }
+  return { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, send }
 }

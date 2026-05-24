@@ -30,7 +30,7 @@ export async function sendMessage(sessionId, message, languageOverride = null) {
   return res.json()
 }
 
-export async function streamMessage(sessionId, message, languageOverride = null, { onToken, onDone, onError }) {
+export async function streamMessage(sessionId, message, languageOverride = null, modelPreference = null, { onToken, onDone, onError }) {
   let res
   try {
     res = await fetch(`${BASE_URL}/chat/stream`, {
@@ -40,6 +40,7 @@ export async function streamMessage(sessionId, message, languageOverride = null,
         session_id: sessionId,
         message,
         language_override: languageOverride,
+        model_preference: modelPreference,
       }),
     })
   } catch {
