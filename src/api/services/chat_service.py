@@ -16,8 +16,10 @@ from src.storage.models import ChatMessage, ChatSession, MessageRoleEnum
 from src.storage.vector_db import VectorDBClient
 from src.translation.client import TranslationClient
 
-# Number of recent messages to include as conversation context
+# Number of recent messages to load from DB (wider window for other future uses)
 _HISTORY_WINDOW = 10
+# Number of messages to actually send to the LLM as context (last 3 turn pairs)
+_HISTORY_SEND_WINDOW = 6
 
 
 def process_chat(
@@ -120,12 +122,24 @@ def process_chat(
     ]
 
     # ------------------------------------------------------------------
-    # 6. Synthesise answer
+    # 6. Build conversation history for multi-turn context
     # ------------------------------------------------------------------
-    english_answer = llm_client.answer_question(question=english_message, chunks=chunks)
+    history_turns = [
+        {"role": msg.role.value if hasattr(msg.role, "value") else msg.role, "content": msg.content}
+        for msg in recent_messages[-_HISTORY_SEND_WINDOW:]
+    ] or None
 
     # ------------------------------------------------------------------
-    # 7. Translate answer back if needed
+    # 7. Synthesise answer
+    # ------------------------------------------------------------------
+    english_answer = llm_client.answer_question(
+        question=english_message,
+        chunks=chunks,
+        history=history_turns,
+    )
+
+    # ------------------------------------------------------------------
+    # 8. Translate answer back if needed
     # ------------------------------------------------------------------
     final_answer = english_answer
     if detected_language != "eng":
@@ -143,7 +157,7 @@ def process_chat(
             final_answer = english_answer
 
     # ------------------------------------------------------------------
-    # 8. Build sources from chunk payloads
+    # 9. Build sources from chunk payloads
     # ------------------------------------------------------------------
     sources: List[SourceRef] = []
     seen_urls: set[str] = set()
@@ -165,7 +179,7 @@ def process_chat(
     sources_dicts = [s.model_dump() for s in sources]
 
     # ------------------------------------------------------------------
-    # 9. Persist messages
+    # 10. Persist messages
     # ------------------------------------------------------------------
     user_msg = ChatMessage(
         session_id=session_uuid,
@@ -192,7 +206,7 @@ def process_chat(
     db.commit()
 
     # ------------------------------------------------------------------
-    # 10. Schedule faithfulness scoring (off critical path)
+    # 11. Schedule faithfulness scoring (off critical path)
     # ------------------------------------------------------------------
     if background_tasks is not None:
         from src.config.settings import settings as _settings
