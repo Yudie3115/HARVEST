@@ -516,7 +516,7 @@ def chat_quality(
             FROM chat_messages
             WHERE session_id = am.session_id
               AND role = 'user'
-              AND created_at < am.created_at
+              AND created_at <= am.created_at
             ORDER BY created_at DESC
             LIMIT 1
         ) um ON true
