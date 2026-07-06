@@ -188,6 +188,30 @@ class TestIngestManualDocument:
         # download_document must NOT be called for file uploads
         ingestion_mocks["download"].assert_not_called()
 
+    def test_classification_written_to_document_metadata(self, ingestion_mocks):
+        """The dashboard reads relevance from extra_metadata['llm_classification'],
+        so manual ingestion must stash the classification there (like the crawl path)."""
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        ingest_manual_document(content=b"%PDF fake", filename="guide.pdf")
+
+        ingestion_mocks["db"].update_document_metadata.assert_called_once()
+        _, meta = ingestion_mocks["db"].update_document_metadata.call_args.args
+        assert meta["llm_classification"]["relevance_score"] == 7.5
+        assert meta["relevance_score"] == 7.5
+
+    def test_low_relevance_still_records_metadata(self, ingestion_mocks):
+        """Even when gated out, the score should surface in the dashboard."""
+        ingestion_mocks["classify"].return_value = _make_good_classification(score=2.0)
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"%PDF fake", filename="guide.pdf")
+
+        assert result["status"] == "skipped"
+        ingestion_mocks["db"].update_document_metadata.assert_called_once()
+        _, meta = ingestion_mocks["db"].update_document_metadata.call_args.args
+        assert meta["relevance_score"] == 2.0
+
     def test_url_ingestion_calls_download_document(self, ingestion_mocks):
         ingestion_mocks["download"].return_value = {
             "minio_path": "fakeid.pdf",
@@ -374,3 +398,82 @@ class TestCLI:
         )
         assert exit_code == 1
         mock_fn.assert_not_called()
+
+    # --- Directory ingestion --------------------------------------------------
+
+    def _processed(self):
+        return {"status": "processed", "document_id": str(uuid4()),
+                "url": "upload://x/f", "chunks": 3, "relevance_score": 8.0}
+
+    def test_dir_ingests_each_matching_file_and_ignores_others(self, tmp_path):
+        (tmp_path / "a.pdf").write_bytes(b"a")
+        (tmp_path / "b.docx").write_bytes(b"b")
+        (tmp_path / "notes.txt").write_bytes(b"skip me")  # non-matching
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "nested.pdf").write_bytes(b"deep")  # ignored (non-recursive)
+
+        exit_code, mock_fn = self._run(["--dir", str(tmp_path)], self._processed())
+
+        assert exit_code == 0
+        assert mock_fn.call_count == 2
+        names = {c.kwargs["filename"] for c in mock_fn.call_args_list}
+        assert names == {"a.pdf", "b.docx"}
+
+    def test_dir_recursive_picks_up_nested_files(self, tmp_path):
+        (tmp_path / "top.pdf").write_bytes(b"a")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "nested.pdf").write_bytes(b"b")
+
+        exit_code, mock_fn = self._run(
+            ["--dir", str(tmp_path), "--recursive"], self._processed()
+        )
+
+        assert exit_code == 0
+        assert mock_fn.call_count == 2
+
+    def test_dir_forwards_site_and_omits_title(self, tmp_path):
+        (tmp_path / "a.pdf").write_bytes(b"a")
+
+        _, mock_fn = self._run(["--dir", str(tmp_path), "--site", "fao"], self._processed())
+
+        kw = mock_fn.call_args.kwargs
+        assert kw["site_name"] == "fao"
+        assert kw["title"] is None
+
+    def test_dir_no_matching_files_exits_nonzero(self, tmp_path):
+        (tmp_path / "notes.txt").write_bytes(b"nope")
+
+        exit_code, mock_fn = self._run(["--dir", str(tmp_path)], self._processed())
+
+        assert exit_code == 1
+        mock_fn.assert_not_called()
+
+    def test_dir_skipped_files_still_exit_zero(self, tmp_path):
+        (tmp_path / "a.pdf").write_bytes(b"a")
+
+        exit_code, _ = self._run(
+            ["--dir", str(tmp_path)],
+            {"status": "skipped", "reason": "low_relevance", "relevance_score": 2.0},
+        )
+        assert exit_code == 0
+
+    def test_dir_failed_file_exits_nonzero(self, tmp_path):
+        (tmp_path / "a.pdf").write_bytes(b"a")
+
+        exit_code, _ = self._run(
+            ["--dir", str(tmp_path)],
+            {"status": "failed", "document_id": str(uuid4()), "chunks": 0},
+        )
+        assert exit_code == 1
+
+    def test_nonexistent_dir_exits_nonzero(self):
+        exit_code, mock_fn = self._run(
+            ["--dir", "/tmp/does_not_exist_dir_abc123"], {}
+        )
+        assert exit_code == 1
+        mock_fn.assert_not_called()
+
+    def test_title_with_dir_errors(self, tmp_path):
+        with pytest.raises(SystemExit):
+            from scripts.ingest_document import main
+            main(["--dir", str(tmp_path), "--title", "Nope"])

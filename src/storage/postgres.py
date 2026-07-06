@@ -213,6 +213,21 @@ class PostgresClient:
             else:
                 logger.warning(f"update_document_file_info: document {document_id} not found, skipping")
 
+    def update_document_metadata(self, document_id: UUID, metadata_updates: Dict) -> None:
+        """Shallow-merge keys into a Document's extra_metadata JSON blob.
+
+        Reassigns a new dict so SQLAlchemy detects the change on the JSONB column.
+        """
+        with self.get_session() as session:
+            doc = session.query(Document).filter(
+                Document.id == document_id
+            ).first()
+            if doc:
+                doc.extra_metadata = {**(doc.extra_metadata or {}), **metadata_updates}
+                session.commit()
+            else:
+                logger.warning(f"update_document_metadata: document {document_id} not found, skipping")
+
     # Classification methods
     
     def create_classification(

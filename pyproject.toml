@@ -54,7 +54,7 @@ uvicorn = {extras = ["standard"], version = ">=0.27.0"}
 slowapi = ">=0.1.9"
 
 # Utils
-pydantic = "^2.5.0"
+pydantic = "<2.11.0"
 pydantic-settings = "^2.1.0"
 loguru = "^0.7.0"
 python-dotenv = "^1.0.0"

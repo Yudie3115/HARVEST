@@ -101,7 +101,7 @@ post-harvest-knowledge-scraper/
 │   ├── init_db.py                  # Create/migrate database tables
 │   ├── deploy_flows.py             # Deploy Prefect workflows with schedules
 │   ├── smoke_test.py               # End-to-end feature verification
-│   └── ingest_document.py          # CLI: manually add a file or URL
+│   └── ingest_document.py          # CLI: manually add a file, URL, or folder (--dir)
 │
 ├── tests/                          # Test suite
 │   ├── test_extractors.py

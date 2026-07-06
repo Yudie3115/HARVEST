@@ -152,6 +152,17 @@ def ingest_manual_document(
     classification = classify_document_content(text, url=source_url)
     relevance_score = classification.get("relevance_score", 0.0)
 
+    # Mirror the crawl pipeline: stash the classification on the Document's
+    # metadata so the admin dashboard (which reads
+    # extra_metadata["llm_classification"]) shows relevance for manual uploads too.
+    db.update_document_metadata(
+        UUID(doc_id),
+        {
+            "llm_classification": classification,
+            "relevance_score": relevance_score,
+        },
+    )
+
     # --- Relevance gate ---
     if relevance_score < settings.relevance_threshold:
         db.update_document_status(

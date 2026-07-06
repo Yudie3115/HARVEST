@@ -276,7 +276,7 @@ Test coverage by module:
 | `tests/test_llm.py` | URL classification, content classification, prompt builders, embeddings |
 | `tests/test_storage.py` | VectorDBClient (Qdrant), PostgresClient – all with mocks |
 | `tests/test_translation_client.py` | TranslationClient: translate, detect_language, check_connection, retry logic, text chunking – all with mocked HTTP |
-| `tests/test_manual_ingestion.py` | PostgresClient helpers, `ingest_manual_document` (file + URL paths, relevance gate, exception handling), CLI flags and exit codes – all with mocks |
+| `tests/test_manual_ingestion.py` | PostgresClient helpers, `ingest_manual_document` (file + URL paths, relevance gate, exception handling), CLI flags including folder ingestion (`--dir`, `--recursive`) and exit codes – all with mocks |
 
 Run a single test file:
 
@@ -554,10 +554,24 @@ poetry run python -m scripts.ingest_document \
 
 # Download and ingest a remote document
 poetry run python -m scripts.ingest_document --url https://example.org/guide.pdf
+
+# Ingest every supported file in a folder as one source (top-level only)
+poetry run python -m scripts.ingest_document --dir /path/to/guides --site fao
+
+# ...including files in subfolders
+poetry run python -m scripts.ingest_document --dir /path/to/guides --recursive --site fao
 ```
 
-Exit codes: `0` = processed successfully, `1` = rejected (low relevance / no
-content) or failed.
+With `--dir`, every file whose extension is `.pdf`, `.docx`, `.doc`, `.html`, or
+`.htm` is ingested; other files are ignored (and counted in the summary). Each
+document is titled by its filename, so `--title` is not allowed with `--dir`. All
+files share the same `--site` label, giving you a folder-as-one-source grouping.
+
+Exit codes for `--file` / `--url`: `0` = processed successfully, `1` = rejected
+(low relevance / no content) or failed. For `--dir`: `0` unless a file hard-fails
+(extraction/embedding error) or the folder has no matching files — low-relevance
+skips are expected in a bulk import and do not fail the run (each is still
+reported per file).
 
 The ingested document is stored with `site_name = "manual"` (or whatever you
 pass with `--site`) and is immediately searchable in the dashboard and via the
