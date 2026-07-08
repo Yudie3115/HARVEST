@@ -14,4 +14,4 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     language_override: str | None = None  # e.g. "lug", "ach"
-    model_preference: Literal["openai", "groq"] | None = None
+    model_preference: Literal["openai", "groq", "ollama"] | None = None

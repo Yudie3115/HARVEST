@@ -10,7 +10,14 @@ const LANGUAGES = {
   lgg: 'Lugbara',
 }
 
-export default function LanguageBar({ detectedLanguage, languageOverride, onOverride, modelPreference, onModelChange }) {
+export default function LanguageBar({
+  detectedLanguage,
+  languageOverride,
+  onOverride,
+  modelPreference,
+  modelOptions,
+  onModelChange,
+}) {
   const detectedName = LANGUAGES[detectedLanguage] || 'English'
 
   return (
@@ -71,7 +78,11 @@ export default function LanguageBar({ detectedLanguage, languageOverride, onOver
           ))}
         </select>
       </div>
-      <ModelPicker modelPreference={modelPreference} onModelChange={onModelChange} />
+      <ModelPicker
+        modelPreference={modelPreference}
+        models={modelOptions}
+        onModelChange={onModelChange}
+      />
     </div>
   )
 }

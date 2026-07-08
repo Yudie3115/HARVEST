@@ -178,6 +178,49 @@ def test_score_threshold_passed_to_search(mocks):
     assert call_kwargs.get("score_threshold") == 0.35
 
 
+def test_chat_model_options_use_effective_ollama_fallback():
+    """Public model metadata should not advertise OpenAI when it will fall back."""
+    from src.api.routes import chat
+
+    with patch("src.api.routes.chat.settings") as mock_settings:
+        mock_settings.llm_provider = "openai"
+        mock_settings.openai_api_key = ""
+        mock_settings.openai_model = "gpt-4o-mini"
+        mock_settings.groq_api_key = ""
+        mock_settings.groq_model = "llama-3.3-70b-versatile"
+        mock_settings.ollama_model = "gemma4:e2b"
+
+        options = chat._model_options()
+
+    assert options == [
+        {
+            "value": "ollama",
+            "provider": "ollama",
+            "label": "gemma4:e2b",
+            "sub": "Ollama",
+            "is_default": True,
+        }
+    ]
+
+
+def test_chat_model_options_include_configured_overrides():
+    """When optional providers are configured, expose them as explicit choices."""
+    from src.api.routes import chat
+
+    with patch("src.api.routes.chat.settings") as mock_settings:
+        mock_settings.llm_provider = "ollama"
+        mock_settings.ollama_model = "gemma4:e2b"
+        mock_settings.groq_api_key = "groq-key"
+        mock_settings.groq_model = "llama-3.3-70b-versatile"
+        mock_settings.openai_api_key = "openai-key"
+        mock_settings.openai_model = "gpt-4o-mini"
+
+        options = chat._model_options()
+
+    assert [option["value"] for option in options] == ["ollama", "groq", "openai"]
+    assert options[0]["is_default"] is True
+
+
 def test_sources_include_score_and_snippet(mocks):
     """Each returned SourceRef must include score and snippet from the search hit."""
     from src.api.services.chat_service import process_chat

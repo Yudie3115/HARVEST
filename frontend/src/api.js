@@ -16,6 +16,12 @@ export async function getHistory(sessionId) {
   return res.json()
 }
 
+export async function getChatModels() {
+  const res = await fetch(`${BASE_URL}/chat/models`)
+  if (!res.ok) throw new Error(`Failed to load chat models: ${res.status}`)
+  return res.json()
+}
+
 export async function sendMessage(sessionId, message, languageOverride = null) {
   const res = await fetch(`${BASE_URL}/chat`, {
     method: 'POST',

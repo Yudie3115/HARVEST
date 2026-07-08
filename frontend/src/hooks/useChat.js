@@ -1,7 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
-import { getHistory, streamMessage } from '../api'
+import { getChatModels, getHistory, streamMessage } from '../api'
 
 const MODEL_STORAGE_KEY = 'phk_model_preference'
+const FALLBACK_MODEL_OPTIONS = [
+  { value: 'ollama', label: 'Configured model', sub: 'Default', provider: 'ollama', is_default: true },
+]
 
 const WELCOME = {
   id: 'welcome',
@@ -18,12 +21,36 @@ export function useChat(sessionId) {
   const [detectedLanguage, setDetectedLanguage] = useState('eng')
   const [languageOverride, setLanguageOverride] = useState(null)
   const [modelPreference, setModelPreferenceState] = useState(
-    () => localStorage.getItem(MODEL_STORAGE_KEY) || 'groq'
+    () => localStorage.getItem(MODEL_STORAGE_KEY) || null
   )
+  const [modelOptions, setModelOptions] = useState(FALLBACK_MODEL_OPTIONS)
 
   const setModelPreference = useCallback((value) => {
-    localStorage.setItem(MODEL_STORAGE_KEY, value)
+    if (value) localStorage.setItem(MODEL_STORAGE_KEY, value)
+    else localStorage.removeItem(MODEL_STORAGE_KEY)
     setModelPreferenceState(value)
+  }, [])
+
+  useEffect(() => {
+    getChatModels()
+      .then((data) => {
+        const options = data.options?.length ? data.options : FALLBACK_MODEL_OPTIONS
+        const defaultOption = options.find((option) => option.is_default) || options[0]
+        const savedPreference = localStorage.getItem(MODEL_STORAGE_KEY)
+        const savedIsValid = savedPreference && options.some((option) => option.value === savedPreference)
+
+        setModelOptions(options)
+        if (savedIsValid) {
+          setModelPreferenceState(savedPreference)
+        } else {
+          localStorage.removeItem(MODEL_STORAGE_KEY)
+          setModelPreferenceState(defaultOption.value)
+        }
+      })
+      .catch(() => {
+        setModelOptions(FALLBACK_MODEL_OPTIONS)
+        setModelPreferenceState((current) => current || FALLBACK_MODEL_OPTIONS[0].value)
+      })
   }, [])
 
   // Reload message history when sessionId becomes available (e.g. page refresh)
@@ -111,5 +138,15 @@ export function useChat(sessionId) {
     [sessionId, isLoading, languageOverride, modelPreference]
   )
 
-  return { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, send }
+  return {
+    messages,
+    isLoading,
+    detectedLanguage,
+    languageOverride,
+    setLanguageOverride,
+    modelPreference,
+    setModelPreference,
+    modelOptions,
+    send,
+  }
 }

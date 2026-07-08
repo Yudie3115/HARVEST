@@ -9,7 +9,7 @@ import { useChat } from './hooks/useChat'
 
 export default function App() {
   const { sessionId, loading: sessionLoading } = useSession()
-  const { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, send } =
+  const { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, modelOptions, send } =
     useChat(sessionId)
 
   const [activeSources, setActiveSources] = useState(null)
@@ -35,6 +35,7 @@ export default function App() {
         languageOverride={languageOverride}
         onOverride={setLanguageOverride}
         modelPreference={modelPreference}
+        modelOptions={modelOptions}
         onModelChange={setModelPreference}
       />
       <InputBar onSend={send} disabled={isLoading || sessionLoading || !sessionId} />
