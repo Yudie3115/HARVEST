@@ -531,7 +531,20 @@ Summary:"""
                 return True
             else:  # ollama
                 tags = self.client.list()
-                available_models = [m['name'] for m in tags.get('models', [])]
+                models = tags.get("models", []) if isinstance(tags, dict) else getattr(tags, "models", [])
+
+                available_models = [
+                    (
+                        m.get("name")
+                        or m.get("model")
+                        if isinstance(m, dict)
+                        else getattr(m, "name", None) or getattr(m, "model", None)
+                    )
+                    for m in models
+                ]
+
+                available_models = [m for m in available_models if m]
+
                 logger.info(f"Connected to Ollama. Available models: {available_models}")
                 return True
         except Exception as e:

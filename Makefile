@@ -39,7 +39,7 @@ install:
 
 install-local:
 	poetry install
-	cd frontend && npm install
+	cd frontend && pnpm install
 
 setup: install
 	docker-compose up -d
@@ -61,7 +61,7 @@ local: check-local-services
 	@trap 'kill $$api_pid $$frontend_pid 2>/dev/null || true' INT TERM EXIT; \
 	poetry run uvicorn src.api.main:app --reload --port 8000 & \
 	api_pid=$$!; \
-	(cd frontend && npm run dev) & \
+	(cd frontend && pnpm run dev) & \
 	frontend_pid=$$!; \
 	wait -n $$api_pid $$frontend_pid
 
@@ -69,7 +69,7 @@ api:
 	poetry run uvicorn src.api.main:app --reload --port 8000
 
 frontend:
-	cd frontend && npm run dev
+	cd frontend && pnpm run dev
 
 start:
 	docker-compose up -d
