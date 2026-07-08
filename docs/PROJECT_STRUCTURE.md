@@ -49,7 +49,7 @@ post-harvest-knowledge-scraper/
 │   │   ├── models.py               # SQLAlchemy ORM models (all tables)
 │   │   ├── postgres.py             # PostgreSQL client
 │   │   ├── minio_client.py         # MinIO object storage
-│   │   └── vector_db.py            # Qdrant vector database
+│   │   └── vector_db.py            # Vector DB facade (ChromaDB/Qdrant)
 │   │
 │   ├── translation/                # Sunbird AI translation
 │   │   ├── __init__.py             # Exports TranslationClient, SUPPORTED_LANGUAGES
@@ -166,7 +166,7 @@ Streamlit app for internal use. Not exposed publicly in production. Useful for m
 | `crawl_runs` | Pipeline | One row per crawl execution |
 | `documents` | Pipeline | All discovered documents |
 | `document_classifications` | Pipeline | LLM-generated metadata |
-| `content_chunks` | Pipeline | Text chunks linked to Qdrant vector IDs |
+| `content_chunks` | Pipeline | Text chunks linked to vector DB IDs |
 | `chat_sessions` | Chatbot | One row per conversation |
 | `chat_messages` | Chatbot | All messages with language and sources |
 

@@ -18,14 +18,14 @@ PostHarvest AI has two distinct parts that share the same infrastructure:
 ┌─────────────────────────▼────────────────────────────────┐
 │                   Shared infrastructure                   │
 │                                                          │
-│   PostgreSQL  ·  Qdrant  ·  MinIO                        │
+│   PostgreSQL  ·  Vector DB  ·  MinIO                     │
 └─────────────────────────▲────────────────────────────────┘
                           │
 ┌─────────────────────────┴────────────────────────────────┐
 │                   Knowledge pipeline (internal)           │
 │                                                          │
 │   Prefect ──→ Scrapers ──→ Extractors ──→ LLM classify   │
-│                                    └──→ Embed ──→ Qdrant  │
+│                                    └──→ Embed ──→ Vector DB│
 │   Streamlit dashboard (monitoring + manual ingestion)    │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -44,7 +44,7 @@ FastAPI /chat
   ├─ 1. Detect language          Sunbird AI /tasks/language_id
   ├─ 2. Translate to English     Sunbird AI /tasks/translate
   ├─ 3. Embed query              OpenAI text-embedding-3-small (1536d)
-  ├─ 4. Vector search            Qdrant cosine similarity, top-10
+  ├─ 4. Vector search            ChromaDB or Qdrant cosine similarity, top-10
   ├─ 5. Synthesise answer        OpenAI GPT-4o-mini + retrieved chunks
   ├─ 6. Translate answer back    Sunbird AI /tasks/translate
   └─ 7. Persist + return         chat_messages → PostgreSQL
@@ -112,7 +112,7 @@ process_document(doc_id, url)
   ├─ classify_content()      → topics, crops, regions, relevance (LLM)
   ├─ chunk_text()            → 1000-token chunks, 200-token overlap
   ├─ embed_chunks()          → OpenAI / sentence-transformers
-  └─ upsert_to_qdrant()      → vectors with payload metadata
+  └─ upsert_to_vector_db()   → vectors with payload metadata
 ```
 
 ### Scheduling
@@ -134,7 +134,7 @@ process_document(doc_id, url)
 | `crawl_runs` | One row per crawl execution (site, status, counters) |
 | `documents` | Discovered documents (URL, status, file hash, metadata) |
 | `document_classifications` | LLM-generated metadata (topics, crops, regions, relevance) |
-| `content_chunks` | Text chunks linked to Qdrant vector IDs |
+| `content_chunks` | Text chunks linked to vector DB IDs |
 
 ### Chatbot tables
 
@@ -152,13 +152,15 @@ All services run as Docker containers. Local development uses `docker-compose.ym
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `postgres` | postgres:15-alpine | 5433 (host) | All persistent data |
-| `qdrant` | qdrant/qdrant | 6333, 6334 | Vector search |
+| `qdrant` | qdrant/qdrant | 6333, 6334 | Vector search for Docker/production |
 | `minio` | minio/minio | 9000, 9001 | Document object storage |
 | `prefect-server` | prefecthq/prefect | 4200 | Workflow orchestration UI |
 | `api` | (built locally) | 8000 | FastAPI chatbot backend |
 | `frontend` | (built locally) | 5173→80 | React chat UI (nginx in prod) |
 
 > PostgreSQL is exposed on host port **5433** (not 5432) to avoid conflict with any local PostgreSQL instance.
+
+> Non-Docker local development can use embedded ChromaDB instead of Qdrant by setting `VECTOR_DB_PROVIDER=chroma`.
 
 ---
 

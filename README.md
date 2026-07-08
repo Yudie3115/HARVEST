@@ -30,13 +30,13 @@ React SPA             Meta Cloud API
          FastAPI  (api.domain.com)
          ├── Language detection (Sunbird AI)
          ├── Query translation → English
-         ├── Semantic search (Qdrant)
+         ├── Semantic search (ChromaDB local / Qdrant Docker)
          ├── Answer synthesis (OpenAI)
          └── Answer translation → user language
                  │
          ┌───────┴────────────────────┐
          ▼                            ▼
-    PostgreSQL               Qdrant + MinIO
+    PostgreSQL          Vector DB + MinIO
   (metadata, sessions)    (vectors, documents)
                  ▲
     Prefect + Scrapers
@@ -58,7 +58,7 @@ React SPA             Meta Cloud API
 | Extraction | PyMuPDF, pdfplumber, yt-dlp |
 | LLM | OpenAI (primary), Ollama / Gemma4 E2b (local alternative) |
 | Embeddings | OpenAI text-embedding-3-small / sentence-transformers |
-| Vector DB | Qdrant |
+| Vector DB | ChromaDB for non-Docker local development, Qdrant for Docker/production |
 | Database | PostgreSQL 15 |
 | Object storage | MinIO |
 | Orchestration | Prefect 2 |
@@ -93,8 +93,8 @@ make install-local
 cp .env.example .env   # set LLM_PROVIDER, model, and admin credentials
 
 # 3. Start infrastructure
-docker compose up -d                 # full Docker stack
-# or run PostgreSQL, Qdrant, and MinIO locally/externally for non-Docker app development
+docker compose up -d                 # full Docker stack with Qdrant
+# or run PostgreSQL and MinIO locally; ChromaDB is embedded for non-Docker app development
 
 # 4. Initialise database
 make init-db
@@ -105,7 +105,8 @@ poetry run streamlit run dashboard/app.py                  # admin dashboard →
 ```
 
 For a one-command non-Docker first run after configuring `.env` and starting
-local PostgreSQL, Qdrant, and MinIO, use `make dev-local`.
+local PostgreSQL and MinIO, use `make dev-local`. ChromaDB stores vectors under
+`./data/chroma` by default.
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full guide including testing, crawling, and troubleshooting.
 
@@ -120,7 +121,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full guide including testin
 | Admin dashboard | http://localhost:8501 |
 | Prefect UI | http://localhost:4200 |
 | MinIO console | http://localhost:9001 |
-| Qdrant | http://localhost:6333 |
+| Vector DB | ChromaDB at `./data/chroma` locally, Qdrant at http://localhost:6333 in Docker |
 | PostgreSQL | localhost:5432 for non-Docker local, localhost:5433 for Docker Compose |
 
 ---

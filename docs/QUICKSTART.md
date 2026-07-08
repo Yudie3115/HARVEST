@@ -4,7 +4,7 @@
 
 - **Python 3.11+** and **Poetry**
 - **Node.js 20+** and **npm** (for the chatbot frontend)
-- **Docker & Docker Compose** for the full stack, or local PostgreSQL, Qdrant, and MinIO services for the non-Docker app workflow
+- **Docker & Docker Compose** for the full stack, or local PostgreSQL and MinIO services for the non-Docker app workflow. ChromaDB runs embedded locally by default.
 - **Git**
 - **OpenAI API Key** (recommended) OR **Ollama** running on an accessible host with `gemma4:e2b` pulled
 - **100 GB+ disk space** for documents and vector database
@@ -123,8 +123,9 @@ Expected output:
 
 ### Few-command local workflow
 
-Use this path when PostgreSQL, Qdrant, and MinIO are already running locally or
-on another host. This does not start Docker containers. See
+Use this path when PostgreSQL and MinIO are already running locally or on
+another host. ChromaDB runs embedded by default, so this does not require a
+separate vector database service. This does not start Docker containers. See
 [Local External Dependencies](LOCAL_DEPENDENCIES.md) for installing and running
 those services without Docker Compose.
 
@@ -137,9 +138,10 @@ make local
 ```
 
 `make dev-local`, `make setup-local`, and `make local` read `.env`, then check
-PostgreSQL, Qdrant, and MinIO before continuing. If a service is missing, update
-`.env` to point at your local service or use `make start` for the Docker-backed
-stack.
+PostgreSQL and MinIO before continuing. With `VECTOR_DB_PROVIDER=chroma`,
+ChromaDB uses the embedded persistent store at `CHROMA_PATH` and does not need a
+separate service. If a service is missing, update `.env` to point at your local
+service or use `make start` for the Docker-backed Qdrant stack.
 
 ### Chatbot API (FastAPI)
 
@@ -217,7 +219,7 @@ for each check:
 ──────────────────────────────────────────────────────────────
   ✓ PASS  PostgreSQL connection
   ✓ PASS  MinIO connection
-  ✓ PASS  Qdrant connection
+  ✓ PASS  Vector DB connection
   ✓ PASS  LLM connection
   ✓ PASS  Embedding service
            → dimension: 1536
@@ -301,7 +303,7 @@ Test coverage by module:
 | `tests/test_utils.py` | Hashing, text cleaning, chunking, keyword matching |
 | `tests/test_extractors.py` | HTML extraction, PDF parsing, VTT parsing, video metadata |
 | `tests/test_llm.py` | URL classification, content classification, prompt builders, embeddings |
-| `tests/test_storage.py` | VectorDBClient (Qdrant), PostgresClient – all with mocks |
+| `tests/test_storage.py` | VectorDBClient (Qdrant and ChromaDB), PostgresClient – all with mocks |
 | `tests/test_translation_client.py` | TranslationClient: translate, detect_language, check_connection, retry logic, text chunking – all with mocked HTTP |
 | `tests/test_manual_ingestion.py` | PostgresClient helpers, `ingest_manual_document` (file + URL paths, relevance gate, exception handling), CLI flags including folder ingestion (`--dir`, `--recursive`) and exit codes – all with mocks |
 
@@ -378,10 +380,10 @@ print('Bucket objects:', m.list_objects()[:5])
 # Browser: http://localhost:9001  (user: minioadmin / pass: minioadmin123)
 ```
 
-**5. Qdrant (vector database)**
+**5. Vector DB**
 
 ```bash
-# REST health check
+# Qdrant REST health check when VECTOR_DB_PROVIDER=qdrant
 curl -s http://localhost:6333/collections | python3 -m json.tool
 
 poetry run python -c "
@@ -415,7 +417,7 @@ print(result)
 # Expected: {'urls_discovered': ~150, 'documents_stored': ~40, 'status': 'completed'}
 ```
 
-Process a single document (requires DB + MinIO + Qdrant + LLM):
+Process a single document (requires DB + MinIO + configured vector DB + LLM):
 
 ```bash
 poetry run python -c "
@@ -508,9 +510,9 @@ Tabs available:
 |-----|----------|
 | Overview | Live document counts, processing rate, vectors indexed, crawl activity chart |
 | Documents | Searchable/filterable table of all discovered documents |
-| Search | Semantic search across processed chunks in Qdrant; auto-translates queries from local Ugandan languages |
+| Search | Semantic search across processed chunks in the configured vector DB; auto-translates queries from local Ugandan languages |
 | Knowledge Base Q&A | Ask questions in English or a local Ugandan language; get grounded answers translated back to your language |
-| Configuration | LLM/crawl settings, service connection health checker (PostgreSQL, MinIO, Qdrant, LLM, Prefect, Sunbird AI) |
+| Configuration | LLM/crawl settings, service connection health checker (PostgreSQL, MinIO, vector DB, LLM, Prefect, Sunbird AI) |
 | Add Document | Manually add a PDF, Word document, or HTML page by file upload or URL; LLM relevance check applied automatically |
 
 ---
@@ -636,7 +638,7 @@ docker compose logs -f postgres            # single service
 tail -f logs/scraper.log                   # application log
 
 # Quick health endpoints
-curl -s http://localhost:6333/collections  # Qdrant
+curl -s http://localhost:6333/collections  # Qdrant, when using Docker/Qdrant
 curl -s http://localhost:9000/minio/health/live  # MinIO
 curl -s http://localhost:4200/api/health   # Prefect
 
@@ -691,7 +693,15 @@ docker compose restart postgres
 docker exec -it postharvest-postgres pg_isready
 ```
 
-### Qdrant errors
+### Vector DB errors
+
+For local ChromaDB, confirm the configured provider and path:
+
+```bash
+poetry run python -c "from src.config.settings import settings; print(settings.vector_db_provider, settings.chroma_path)"
+```
+
+For Qdrant:
 
 ```bash
 curl http://localhost:6333/collections

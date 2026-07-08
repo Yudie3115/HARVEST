@@ -2,7 +2,8 @@
 
 Use this guide when you want to run the app with `make dev-local` or
 `make local` without starting the project Docker Compose stack. The app still
-needs PostgreSQL, Qdrant, and MinIO reachable from your machine.
+needs PostgreSQL and MinIO reachable from your machine. ChromaDB runs embedded
+in the Python process by default for this workflow.
 
 ## Expected Local Configuration
 
@@ -11,7 +12,9 @@ credentials:
 
 ```dotenv
 DATABASE_URL=postgresql://scraper:ph_scraper_pass@localhost:5432/postharvest_scraper
-QDRANT_URL=http://localhost:6333
+VECTOR_DB_PROVIDER=chroma
+CHROMA_PATH=./data/chroma
+CHROMA_COLLECTION=postharvest_knowledge
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin123
@@ -57,7 +60,23 @@ Then initialize the app schema:
 make init-db
 ```
 
-## Qdrant
+## Vector Database
+
+### ChromaDB (default for local app development)
+
+No separate ChromaDB service is required. The app uses the `chromadb` Python
+package and persists vectors to `CHROMA_PATH`.
+
+```dotenv
+VECTOR_DB_PROVIDER=chroma
+CHROMA_PATH=./data/chroma
+CHROMA_COLLECTION=postharvest_knowledge
+```
+
+The collection is created by the ingestion/vector storage code when documents
+are indexed.
+
+### Qdrant (optional local alternative)
 
 Install Qdrant from your package manager if available, or download a release
 archive from the official Qdrant releases page. Store data outside the repo if
@@ -75,8 +94,13 @@ Verify:
 curl http://localhost:6333/collections
 ```
 
-The app uses `QDRANT_COLLECTION=postharvest_knowledge`; the collection is
-created by the ingestion/vector storage code when documents are indexed.
+Then set:
+
+```dotenv
+VECTOR_DB_PROVIDER=qdrant
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=postharvest_knowledge
+```
 
 ## MinIO
 
@@ -130,6 +154,7 @@ make local
 
 ## References
 
+- ChromaDB documentation: https://docs.trychroma.com/
 - Qdrant local quickstart: https://qdrant.tech/documentation/quickstart/
 - MinIO documentation: https://docs.min.io/
 - PostgreSQL downloads: https://www.postgresql.org/download/
