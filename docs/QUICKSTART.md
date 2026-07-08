@@ -124,7 +124,9 @@ Expected output:
 ### Few-command local workflow
 
 Use this path when PostgreSQL, Qdrant, and MinIO are already running locally or
-on another host. This does not start Docker containers.
+on another host. This does not start Docker containers. See
+[Local External Dependencies](LOCAL_DEPENDENCIES.md) for installing and running
+those services without Docker Compose.
 
 ```bash
 # First time: install app dependencies, initialize DB, run API + frontend
