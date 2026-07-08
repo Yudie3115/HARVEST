@@ -4,7 +4,7 @@
 
 - **Python 3.11+** and **Poetry**
 - **Node.js 20+** and **npm** (for the chatbot frontend)
-- **Docker & Docker Compose**
+- **Docker & Docker Compose** for the full stack, or local PostgreSQL, Qdrant, and MinIO services for the non-Docker app workflow
 - **Git**
 - **OpenAI API Key** (recommended) OR **Ollama** running on an accessible host with `gemma4:e2b` pulled
 - **100 GB+ disk space** for documents and vector database
@@ -25,14 +25,11 @@ cd post-harvest-knowledge-scraper
 # Install Poetry (if not already installed)
 curl -sSL https://install.python-poetry.org | python3 -
 
-# Install Python dependencies
-poetry install
+# Install Python and frontend dependencies
+make install-local
 
 # If using Ollama as LLM provider (includes the `ollama` Python client):
 poetry install --extras ollama
-
-# Install frontend dependencies
-cd frontend && npm install && cd ..
 ```
 
 ### 2. Start infrastructure
@@ -124,6 +121,24 @@ Expected output:
 
 ## Running the chatbot
 
+### Few-command local workflow
+
+Use this path when PostgreSQL, Qdrant, and MinIO are already running locally or
+on another host. This does not start Docker containers.
+
+```bash
+# First time: install app dependencies, initialize DB, run API + frontend
+make dev-local
+
+# Daily development: run API + frontend together
+make local
+```
+
+`make dev-local`, `make setup-local`, and `make local` read `.env`, then check
+PostgreSQL, Qdrant, and MinIO before continuing. If a service is missing, update
+`.env` to point at your local service or use `make start` for the Docker-backed
+stack.
+
 ### Chatbot API (FastAPI)
 
 ```bash
@@ -160,21 +175,18 @@ To point it at a different API:
 VITE_API_URL=http://localhost:8000 npm run dev
 ```
 
-### Running both without Docker
+### Running both manually without Docker
 
-If you prefer running the API and frontend outside Docker during development:
+If you prefer separate terminal sessions instead of `make local`:
 
 ```bash
-# Terminal 1 — infrastructure only
-docker compose up -d postgres qdrant minio prefect-server
-
-# Terminal 2 — API
+# Terminal 1 — API
 poetry run uvicorn src.api.main:app --reload --port 8000
 
-# Terminal 3 — frontend
+# Terminal 2 — frontend
 cd frontend && npm run dev
 
-# Terminal 4 — admin dashboard (optional)
+# Terminal 3 — admin dashboard (optional)
 poetry run streamlit run dashboard/app.py
 ```
 

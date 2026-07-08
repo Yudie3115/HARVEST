@@ -84,7 +84,7 @@ React SPA             Meta Cloud API
 ```bash
 # 1. Clone and install
 git clone <repo-url> && cd post-harvest-knowledge-scraper
-poetry install && cd frontend && npm install && cd ..
+make install-local
 
 # For Ollama / local LLM support:
 # poetry install --extras ollama
@@ -93,16 +93,19 @@ poetry install && cd frontend && npm install && cd ..
 cp .env.example .env   # set LLM_PROVIDER, model, and admin credentials
 
 # 3. Start infrastructure
-docker compose up -d
+docker compose up -d                 # full Docker stack
+# or run PostgreSQL, Qdrant, and MinIO locally/externally for non-Docker app development
 
 # 4. Initialise database
-poetry run python scripts/init_db.py
+make init-db
 
 # 5. Start services
-poetry run uvicorn src.api.main:app --reload --port 8000   # chatbot API
-cd frontend && npm run dev                                  # chatbot UI → http://localhost:5173
+make local                                  # non-Docker API + chatbot UI
 poetry run streamlit run dashboard/app.py                  # admin dashboard → http://localhost:8501
 ```
+
+For a one-command non-Docker first run after configuring `.env` and starting
+local PostgreSQL, Qdrant, and MinIO, use `make dev-local`.
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full guide including testing, crawling, and troubleshooting.
 
