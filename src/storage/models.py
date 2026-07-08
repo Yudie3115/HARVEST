@@ -190,7 +190,7 @@ class ContentChunk(Base):
     regions = Column(ARRAY(String))
     
     # Vector DB reference
-    vector_id = Column(String(100))  # Qdrant point ID
+    vector_id = Column(String(100))  # Vector DB point ID
     
     # Chunk metadata
     extra_metadata = Column("metadata", JSONB)

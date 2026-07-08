@@ -30,10 +30,17 @@ class Settings(BaseSettings):
     minio_bucket: str = Field(default="postharvest-documents")
     minio_secure: bool = Field(default=False)
     
+    # Vector database
+    vector_db_provider: Literal["qdrant", "chroma"] = Field(default="qdrant")
+
     # Qdrant
     qdrant_url: str = Field(default="http://localhost:6333")
     qdrant_api_key: str = Field(default="")
     qdrant_collection: str = Field(default="postharvest_knowledge")
+
+    # ChromaDB
+    chroma_path: str = Field(default="./data/chroma")
+    chroma_collection: str = Field(default="postharvest_knowledge")
     
     # LLM Provider Configuration
     llm_provider: Literal["openai", "ollama", "groq"] = Field(default="openai")

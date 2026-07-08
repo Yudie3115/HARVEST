@@ -245,7 +245,7 @@ def store_chunks(
     classification: Dict,
 ) -> int:
     """
-    Persist chunks to PostgreSQL (ContentChunk table) and Qdrant.
+    Persist chunks to PostgreSQL (ContentChunk table) and the configured vector DB.
 
     Returns:
         Number of chunks stored.
@@ -289,7 +289,7 @@ def store_chunks(
         vectors.append(chunk["vector"])
         payloads.append({**chunk["payload"], "chunk_id": chunk_uuid})
 
-    # Qdrant bulk upsert
+    # Vector DB bulk upsert
     if chunk_ids:
         vector_db.upsert_chunks(chunk_ids, vectors, payloads)
 
@@ -315,7 +315,7 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
     2. Extract text content
     3. LLM classification
     4. Chunk + embed
-    5. Store chunks in PostgreSQL + Qdrant
+    5. Store chunks in PostgreSQL + vector DB
     6. Update document status in PostgreSQL
 
     Args:

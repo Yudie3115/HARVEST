@@ -107,6 +107,7 @@ services:
     environment:
       DATABASE_URL: postgresql://scraper:ph_scraper_pass@postgres:5432/postharvest_scraper
       MINIO_ENDPOINT: minio:9000
+      VECTOR_DB_PROVIDER: qdrant
       QDRANT_URL: http://qdrant:6333
       # OLLAMA_BASE_URL is read from .env — point it at your Ollama host, e.g.:
       # OLLAMA_BASE_URL: http://192.168.1.50:11434

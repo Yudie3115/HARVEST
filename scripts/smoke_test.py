@@ -81,38 +81,41 @@ def check_minio():
     return len(objects)
 
 
-def check_qdrant():
+def check_vector_db():
     from src.storage.vector_db import VectorDBClient
     from src.config.settings import settings
 
     vdb = VectorDBClient()
-    assert vdb.check_connection(), "Qdrant not reachable"
+    assert vdb.check_connection(), f"{vdb.provider} vector DB not reachable"
 
-    # Check if existing collection dimension matches current embedding dimension.
-    # If the collection was created with a different dimension (e.g. 384 from a
-    # misconfigured .env but embeddings now produce 1536) we must recreate it.
-    existing = [c.name for c in vdb.client.get_collections().collections]
-    if vdb.collection in existing:
-        info = vdb.client.get_collection(vdb.collection)
-        try:
-            cfg = info.config.params.vectors
-            # cfg may be a dict (named vectors) or a VectorParams object
-            if hasattr(cfg, "size"):
-                stored_dim = cfg.size
-            elif isinstance(cfg, dict):
-                stored_dim = next(iter(cfg.values())).size if cfg else None
-            else:
-                stored_dim = None
+    if vdb.provider == "qdrant":
+        # Check if existing collection dimension matches current embedding dimension.
+        # If the collection was created with a different dimension (e.g. 384 from a
+        # misconfigured .env but embeddings now produce 1536) we must recreate it.
+        existing = [c.name for c in vdb.client.get_collections().collections]
+        if vdb.collection in existing:
+            info = vdb.client.get_collection(vdb.collection)
+            try:
+                cfg = info.config.params.vectors
+                # cfg may be a dict (named vectors) or a VectorParams object
+                if hasattr(cfg, "size"):
+                    stored_dim = cfg.size
+                elif isinstance(cfg, dict):
+                    stored_dim = next(iter(cfg.values())).size if cfg else None
+                else:
+                    stored_dim = None
 
-            if stored_dim is not None and stored_dim != settings.embedding_dimension:
-                logger.warning(
-                    f"Collection '{vdb.collection}' has dim={stored_dim} but "
-                    f"embedding_dimension={settings.embedding_dimension}. "
-                    f"Recreating collection."
-                )
-                vdb.ensure_collection(recreate=True)
-        except Exception:
-            pass  # Can't determine dim – proceed as-is
+                if stored_dim is not None and stored_dim != settings.embedding_dimension:
+                    logger.warning(
+                        f"Collection '{vdb.collection}' has dim={stored_dim} but "
+                        f"embedding_dimension={settings.embedding_dimension}. "
+                        f"Recreating collection."
+                    )
+                    vdb.ensure_collection(recreate=True)
+            except Exception:
+                pass  # Can't determine dim – proceed as-is
+        else:
+            vdb.ensure_collection()
     else:
         vdb.ensure_collection()
 
@@ -181,7 +184,7 @@ def check_content_classification(llm_available: bool):
 
 
 def check_vector_roundtrip():
-    """Embed a text, store in Qdrant, search for it, verify it comes back."""
+    """Embed a text, store in the vector DB, search for it, verify it comes back."""
     import uuid
     from src.llm.embeddings import EmbeddingClient
     from src.storage.vector_db import VectorDBClient
@@ -193,7 +196,7 @@ def check_vector_roundtrip():
     test_text = f"Smoke test chunk {time.time()}: hermetic bags reduce aflatoxin contamination"
     vec = embedder.embed(test_text)
 
-    # Qdrant IDs must be UUID strings or unsigned integers – not arbitrary strings
+    # Qdrant IDs must be UUID strings or unsigned integers; use UUIDs for both backends.
     chunk_id = str(uuid.uuid4())
     payload = {
         "document_id": str(uuid.uuid4()),
@@ -310,7 +313,7 @@ def main():
     section("1 / 6  Infrastructure Connectivity")
     pg_ok   = check("PostgreSQL connection", check_postgres)
     minio_ok = check("MinIO connection", check_minio)
-    qdrant_ok = check("Qdrant connection", check_qdrant)
+    vector_db_ok = check("Vector DB connection", check_vector_db)
     llm_result = check("LLM connection", check_llm)
     llm_ok = llm_result is not None
     emb_result = check("Embedding service", check_embeddings)
@@ -338,7 +341,7 @@ def main():
     # ── 4. Vector DB roundtrip ───────────────────────────────────
     section("4 / 6  Vector DB Roundtrip (embed → store → search)")
     vr = check("Embed + upsert + search + delete", check_vector_roundtrip,
-               skip=not (emb_ok and qdrant_ok))
+               skip=not (emb_ok and vector_db_ok))
     if vr:
         print(f"         → {vr} results returned")
 
@@ -358,7 +361,7 @@ def main():
 
     # ── 6. Processing pipeline ───────────────────────────────────
     section("6 / 6  Processing Pipeline (download → extract → embed → store)")
-    if args.skip_process or not (pg_ok and minio_ok and qdrant_ok and emb_ok):
+    if args.skip_process or not (pg_ok and minio_ok and vector_db_ok and emb_ok):
         reason = "--skip-process" if args.skip_process else "dependency not ready"
         print(f"  {SKIP}  Document processing ({reason})")
         _results.append(("Document processing", True, "skipped"))
@@ -370,7 +373,7 @@ def main():
     # ── Semantic search (bonus) ──────────────────────────────────
     section("Bonus  Semantic Search")
     sr = check("Query vector DB", check_semantic_search,
-               skip=not (emb_ok and qdrant_ok))
+               skip=not (emb_ok and vector_db_ok))
     if sr is not None:
         print(f"         → {sr} results (0 is OK if no docs processed yet)")
 

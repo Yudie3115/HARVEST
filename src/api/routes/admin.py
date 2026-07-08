@@ -206,13 +206,14 @@ def check_health(_: str = Depends(require_admin)):
         logger.warning(f"PostgreSQL health check failed: {exc}")
         results["PostgreSQL"] = "error"
 
-    # Qdrant
+    # Vector DB
     try:
         from src.storage.vector_db import VectorDBClient
-        results["Qdrant"] = "ok" if VectorDBClient().check_connection() else "error"
+        label = f"Vector DB ({settings.vector_db_provider})"
+        results[label] = "ok" if VectorDBClient().check_connection() else "error"
     except Exception as exc:
-        logger.warning(f"Qdrant health check failed: {exc}")
-        results["Qdrant"] = "error"
+        logger.warning(f"Vector DB health check failed: {exc}")
+        results[f"Vector DB ({settings.vector_db_provider})"] = "error"
 
     # MinIO
     try:
@@ -312,7 +313,9 @@ def get_config(_: str = Depends(require_admin)):
         },
         "services": {
             "database_url": _mask(str(settings.database_url)),
+            "vector_db_provider": settings.vector_db_provider,
             "qdrant_url": settings.qdrant_url,
+            "chroma_path": settings.chroma_path,
             "minio_endpoint": settings.minio_endpoint,
             "prefect_api_url": settings.prefect_api_url,
             "sunbird_api_url": settings.sunbird_api_url,

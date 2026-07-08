@@ -56,9 +56,19 @@ def main() -> int:
     db_host, db_port = database_host_port()
     results = [
         check_tcp("PostgreSQL", db_host, db_port),
-        check_http("Qdrant", qdrant_collections_url()),
         check_http("MinIO", minio_health_url()),
     ]
+    if settings.vector_db_provider == "qdrant":
+        results.insert(1, check_http("Qdrant", qdrant_collections_url()))
+    else:
+        results.insert(
+            1,
+            CheckResult(
+                "ChromaDB",
+                True,
+                f"persistent local store at {settings.chroma_path}",
+            ),
+        )
 
     print("Checking local services...")
     for result in results:

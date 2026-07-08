@@ -1,6 +1,6 @@
 """
 Tests for manual document ingestion.
-All external services (DB, MinIO, LLM, Qdrant) are mocked.
+All external services (DB, MinIO, LLM, vector DB) are mocked.
 """
 import pytest
 from unittest.mock import MagicMock, patch, call
@@ -298,7 +298,7 @@ class TestIngestManualDocument:
         assert url_arg == "https://example.org/doc.html"
 
     def test_chunk_embed_exception_sets_failed_status(self, ingestion_mocks):
-        ingestion_mocks["chunk"].side_effect = RuntimeError("Qdrant unreachable")
+        ingestion_mocks["chunk"].side_effect = RuntimeError("Vector DB unreachable")
 
         from src.flows.manual_ingestion import ingest_manual_document
 

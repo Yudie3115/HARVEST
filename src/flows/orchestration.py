@@ -84,7 +84,7 @@ def run_quality_checks() -> Dict:
 @task(name="refresh_vector_index")
 def refresh_vector_index() -> Dict:
     """
-    Retrieve collection statistics from Qdrant and log a health summary.
+    Retrieve collection statistics from the configured vector DB and log a health summary.
 
     Returns:
         Collection info dict
