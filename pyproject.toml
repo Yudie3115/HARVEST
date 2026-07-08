@@ -16,7 +16,7 @@ prefect-dask = {version = "^0.2.0", optional = true}
 # Web Scraping
 playwright = "^1.40.0"
 scrapy = "^2.11.0"
-httpx = {extras = ["http2"], version = "^0.25.0"}
+httpx = {extras = ["http2"], version = "^0.28.0"}
 beautifulsoup4 = "^4.12.0"
 lxml = "^5.0.0"
 
@@ -70,6 +70,7 @@ pytest-asyncio = "^0.21.0"
 black = "^23.12.0"
 ruff = "^0.1.0"
 mypy = "^1.7.0"
+anyio = "<4"
 
 [tool.poetry.extras]
 distributed = ["prefect-dask"]
