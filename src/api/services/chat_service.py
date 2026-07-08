@@ -33,6 +33,14 @@ _CONTEXT_TOO_LARGE_ANSWER = (
 )
 
 
+def _history_content(msg: ChatMessage) -> str:
+    role = msg.role.value if hasattr(msg.role, "value") else msg.role
+    english_content = getattr(msg, "english_content", None)
+    if role == "assistant" and isinstance(english_content, str) and english_content:
+        return english_content
+    return msg.content
+
+
 def process_chat(
     request: ChatRequest,
     db: Session,
@@ -51,7 +59,7 @@ def process_chat(
     2. Load the last _HISTORY_WINDOW messages for context.
     3. Detect / override the language of the incoming message.
     4. Translate the message to English if needed.
-    5. Embed the English message and search Qdrant.
+    5. Embed the English message and search the configured vector DB.
     5b. No-results shortcut — skip LLM if no relevant chunks found.
     6. Build conversation history for multi-turn context.
     7. Synthesise an answer via the LLM.
@@ -176,9 +184,7 @@ def process_chat(
     history_turns = [
         {
             "role": msg.role.value if hasattr(msg.role, "value") else msg.role,
-            "content": (msg.english_content or msg.content)
-            if (msg.role.value if hasattr(msg.role, "value") else msg.role) == "assistant"
-            else msg.content,
+            "content": _history_content(msg),
         }
         for msg in recent_messages[-_HISTORY_SEND_WINDOW:]
     ] or None
@@ -373,9 +379,7 @@ def process_chat_stream(
         history_turns = [
             {
                 "role": msg.role.value if hasattr(msg.role, "value") else msg.role,
-                "content": (msg.english_content or msg.content)
-                if (msg.role.value if hasattr(msg.role, "value") else msg.role) == "assistant"
-                else msg.content,
+                "content": _history_content(msg),
             }
             for msg in recent_messages[-_HISTORY_SEND_WINDOW:]
         ] or None
