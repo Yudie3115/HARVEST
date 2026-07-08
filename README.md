@@ -121,7 +121,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full guide including testin
 | Prefect UI | http://localhost:4200 |
 | MinIO console | http://localhost:9001 |
 | Qdrant | http://localhost:6333 |
-| PostgreSQL | localhost:5433 |
+| PostgreSQL | localhost:5432 for non-Docker local, localhost:5433 for Docker Compose |
 
 ---
 

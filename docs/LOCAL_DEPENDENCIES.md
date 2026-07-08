@@ -28,6 +28,8 @@ make check-local-services
 ## PostgreSQL
 
 Install PostgreSQL 15 or newer using your OS package manager.
+Use the normal local PostgreSQL port, `5432`; the Docker Compose stack uses
+host port `5433` only to avoid colliding with this local service.
 
 Ubuntu/Debian:
 
