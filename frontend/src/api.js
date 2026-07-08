@@ -6,13 +6,21 @@ export async function createSession(channel = 'web') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ channel }),
   })
-  if (!res.ok) throw new Error('Failed to create session')
+  if (!res.ok) {
+    const err = new Error('Failed to create session')
+    err.status = res.status
+    throw err
+  }
   return res.json()
 }
 
 export async function getHistory(sessionId) {
   const res = await fetch(`${BASE_URL}/session/${sessionId}/history`)
-  if (!res.ok) throw new Error(`Failed to load history: ${res.status}`)
+  if (!res.ok) {
+    const err = new Error(`Failed to load history: ${res.status}`)
+    err.status = res.status
+    throw err
+  }
   return res.json()
 }
 
@@ -51,19 +59,20 @@ export async function streamMessage(sessionId, message, languageOverride = null,
     })
   } catch {
     onError('Connection failed — check your internet connection.')
-    return
+    return { ok: false, status: null }
   }
 
   if (!res.ok) {
     if (res.status === 429) onError('Too many requests — please wait a moment before trying again.')
-    else if (res.status === 404) onError('Session not found — please refresh the page.')
+    else if (res.status === 404) onError('Session expired — starting a new chat.')
     else onError('Something went wrong. Please try again.')
-    return
+    return { ok: false, status: res.status }
   }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let streamErrorStatus = null
 
   try {
     while (true) {
@@ -78,7 +87,14 @@ export async function streamMessage(sessionId, message, languageOverride = null,
           const event = JSON.parse(part.slice(6))
           if (event.type === 'token') onToken(event.content)
           else if (event.type === 'done') onDone(event)
-          else if (event.type === 'error') onError(event.message)
+          else if (event.type === 'error') {
+            streamErrorStatus = event.status || (event.code === 'session_not_found' ? 404 : null)
+            onError(
+              streamErrorStatus === 404
+                ? 'Session expired — starting a new chat.'
+                : event.message
+            )
+          }
         } catch {
           // Ignore malformed SSE lines
         }
@@ -86,5 +102,9 @@ export async function streamMessage(sessionId, message, languageOverride = null,
     }
   } catch {
     onError('Connection interrupted — please try again.')
+    return { ok: false, status: null }
   }
+
+  if (streamErrorStatus) return { ok: false, status: streamErrorStatus }
+  return { ok: true, status: res.status }
 }

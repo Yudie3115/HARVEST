@@ -15,7 +15,7 @@ const WELCOME = {
   sources: [],
 }
 
-export function useChat(sessionId) {
+export function useChat(sessionId, { onSessionExpired } = {}) {
   const [messages, setMessages] = useState([WELCOME])
   const [isLoading, setIsLoading] = useState(false)
   const [detectedLanguage, setDetectedLanguage] = useState('eng')
@@ -97,45 +97,76 @@ export function useChat(sessionId) {
       ])
       setIsLoading(true)
 
-      await streamMessage(sessionId, text.trim(), languageOverride, modelPreference, {
-        onToken: (token) => {
+      const streamIntoMessage = (activeSessionId) =>
+        streamMessage(activeSessionId, text.trim(), languageOverride, modelPreference, {
+          onToken: (token) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: m.content + token } : m
+              )
+            )
+          },
+          onDone: (event) => {
+            setDetectedLanguage(event.detected_language || 'eng')
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      // Replace streamed English tokens with the (potentially translated) final answer
+                      content: event.answer || m.content,
+                      sources: event.sources || [],
+                      isStreaming: false,
+                      noResults: event.no_results || false,
+                    }
+                  : m
+              )
+            )
+            setIsLoading(false)
+          },
+          onError: (message) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: message, isError: true, isStreaming: false }
+                  : m
+              )
+            )
+            setIsLoading(false)
+          },
+        })
+
+      const result = await streamIntoMessage(sessionId)
+      if (result?.status === 404 && onSessionExpired) {
+        try {
+          const nextSessionId = await onSessionExpired()
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + token } : m
+              m.id === assistantMsgId
+                ? { ...m, content: '', isError: false, isStreaming: true }
+                : m
             )
           )
-        },
-        onDone: (event) => {
-          setDetectedLanguage(event.detected_language || 'eng')
+          setIsLoading(true)
+          await streamIntoMessage(nextSessionId)
+        } catch {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
                 ? {
                     ...m,
-                    // Replace streamed English tokens with the (potentially translated) final answer
-                    content: event.answer || m.content,
-                    sources: event.sources || [],
+                    content: 'Could not start a new chat session. Please refresh the page.',
+                    isError: true,
                     isStreaming: false,
-                    noResults: event.no_results || false,
                   }
                 : m
             )
           )
           setIsLoading(false)
-        },
-        onError: (message) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, content: message, isError: true, isStreaming: false }
-                : m
-            )
-          )
-          setIsLoading(false)
-        },
-      })
+        }
+      }
     },
-    [sessionId, isLoading, languageOverride, modelPreference]
+    [sessionId, isLoading, languageOverride, modelPreference, onSessionExpired]
   )
 
   return {

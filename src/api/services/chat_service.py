@@ -320,7 +320,14 @@ def process_chat_stream(
         session_uuid = UUID(request.session_id)
         chat_session: ChatSession | None = db.get(ChatSession, session_uuid)
         if chat_session is None:
-            yield f"data: {_json.dumps({'type': 'error', 'message': 'Session not found'})}\n\n"
+            yield "data: " + _json.dumps(
+                {
+                    "type": "error",
+                    "code": "session_not_found",
+                    "status": 404,
+                    "message": "Session not found",
+                }
+            ) + "\n\n"
             return
 
         # Load recent history

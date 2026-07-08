@@ -87,7 +87,6 @@ export default function InputBar({ onSend, disabled }) {
           justifyContent: 'center',
           cursor: canSend ? 'pointer' : 'not-allowed',
           transition: 'background 0.15s, transform 0.1s',
-          flexShrink: 0,
         }}
         onMouseEnter={(e) => { if (canSend) e.currentTarget.style.background = '#4a7c59' }}
         onMouseLeave={(e) => { if (canSend) e.currentTarget.style.background = '#3d6b4f' }}

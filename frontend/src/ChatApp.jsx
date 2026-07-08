@@ -8,9 +8,9 @@ import { useSession } from './hooks/useSession'
 import { useChat } from './hooks/useChat'
 
 export default function App() {
-  const { sessionId, loading: sessionLoading } = useSession()
+  const { sessionId, loading: sessionLoading, resetSession } = useSession()
   const { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, modelOptions, send } =
-    useChat(sessionId)
+    useChat(sessionId, { onSessionExpired: resetSession })
 
   const [activeSources, setActiveSources] = useState(null)
 
