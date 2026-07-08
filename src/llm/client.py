@@ -110,6 +110,7 @@ class LLMClient:
                 return response.choices[0].message.content
 
             else:  # ollama
+                fmt = "json" if response_format == "json" else ""
                 if history:
                     # ollama.generate() is single-turn; use chat() for multi-turn
                     messages = []
@@ -120,6 +121,7 @@ class LLMClient:
                     response = self.client.chat(
                         model=self.model,
                         messages=messages,
+                        format=fmt,
                         options={
                             "temperature": temperature or self.temperature,
                             "num_predict": max_tokens or settings.ollama_max_tokens,
@@ -130,19 +132,29 @@ class LLMClient:
                     response = self.client.generate(
                         model=self.model,
                         prompt=prompt,
-                        format=response_format if response_format == "json" else "",
+                        system=system_prompt or "",
+                        format=fmt,
                         options={
                             "temperature": temperature or self.temperature,
                             "num_predict": max_tokens or settings.ollama_max_tokens,
                         },
                     )
-                    return response['response']
+                    return response.response
 
         except Exception as e:
             if self.provider in ("openai", "groq"):
                 try:
                     from openai import APIStatusError
                     if isinstance(e, APIStatusError) and e.status_code == 413:
+                        raise LLMContextTooLargeError(str(e)) from e
+                except ImportError:
+                    pass
+            elif self.provider == "ollama":
+                try:
+                    import ollama as _ollama
+                    if isinstance(e, _ollama.ResponseError) and (
+                        "context" in str(e).lower() or "too long" in str(e).lower()
+                    ):
                         raise LLMContextTooLargeError(str(e)) from e
                 except ImportError:
                     pass

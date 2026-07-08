@@ -56,7 +56,7 @@ React SPA             Meta Cloud API
 | WhatsApp | Meta Cloud API |
 | Scraping | Playwright, Scrapy, Trafilatura |
 | Extraction | PyMuPDF, pdfplumber, yt-dlp |
-| LLM | OpenAI (primary), Ollama (optional local) |
+| LLM | OpenAI (primary), Ollama / Gemma4 E2b (local alternative) |
 | Embeddings | OpenAI text-embedding-3-small / sentence-transformers |
 | Vector DB | Qdrant |
 | Database | PostgreSQL 15 |
@@ -86,8 +86,11 @@ React SPA             Meta Cloud API
 git clone <repo-url> && cd post-harvest-knowledge-scraper
 poetry install && cd frontend && npm install && cd ..
 
+# For Ollama / local LLM support:
+# poetry install --extras ollama
+
 # 2. Configure environment
-cp .env.example .env   # add OPENAI_API_KEY at minimum
+cp .env.example .env   # set LLM_PROVIDER, model, and admin credentials
 
 # 3. Start infrastructure
 docker compose up -d

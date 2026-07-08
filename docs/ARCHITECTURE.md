@@ -189,7 +189,7 @@ Translation is automatically disabled if `SUNBIRD_API_KEY` is not set — the sy
 | Temperature | 0.1 | Low randomness for factual answers |
 | Max tokens | 8192 | Per response |
 
-Local (zero-cost) alternative: set `LLM_PROVIDER=ollama`, `EMBEDDING_PROVIDER=local`. Pull `llama3.1:8b` via Ollama. See QUICKSTART for details.
+Local (zero-cost) alternative: set `LLM_PROVIDER=ollama`, `EMBEDDING_PROVIDER=local`. Point `OLLAMA_BASE_URL` at your Ollama host and set `OLLAMA_MODEL=gemma4:e2b`. Install the extras with `poetry install --extras ollama`. See QUICKSTART for the full walkthrough.
 
 ---
 

@@ -6,11 +6,11 @@
 - **Node.js 20+** and **npm** (for the chatbot frontend)
 - **Docker & Docker Compose**
 - **Git**
-- **OpenAI API Key** (recommended) OR **16 GB RAM** (if using Ollama locally)
+- **OpenAI API Key** (recommended) OR **Ollama** running on an accessible host with `gemma4:e2b` pulled
 - **100 GB+ disk space** for documents and vector database
 
 Optional:
-- **NVIDIA GPU** with 8 GB+ VRAM (only if using Ollama — significantly speeds up LLM inference)
+- **NVIDIA GPU** (only if running Ollama — improves inference speed; not required for Gemma4 E2b at 2B scale)
 
 ---
 
@@ -27,6 +27,9 @@ curl -sSL https://install.python-poetry.org | python3 -
 
 # Install Python dependencies
 poetry install
+
+# If using Ollama as LLM provider (includes the `ollama` Python client):
+poetry install --extras ollama
 
 # Install frontend dependencies
 cd frontend && npm install && cd ..
@@ -82,17 +85,27 @@ SUNBIRD_API_KEY=your_sunbird_api_key_here
 
 If `SUNBIRD_API_KEY` is empty, the translation feature is automatically disabled — no warnings or errors.
 
-For a **fully local, no-cost** setup using Ollama instead:
+For a **fully local, no-cost** setup using Ollama (with Gemma4 E2b) instead:
 
 ```bash
-# In .env:
+# 1. Install the Ollama extras (if not done during poetry install):
+poetry install --extras ollama
+
+# 2. In .env, set:
 LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://<ollama-host>:11434   # or http://localhost:11434
+OLLAMA_MODEL=gemma4:e2b
 EMBEDDING_PROVIDER=local
 
-# Uncomment Ollama in docker-compose.yml, then:
+# 3. Ensure the model is pulled on your Ollama host:
+#    ollama pull gemma4:e2b
+
+# 4. If running Ollama via Docker Compose (optional — skip if Ollama is on another machine):
 docker compose up -d ollama
-docker exec postharvest-ollama ollama pull llama3.1:8b
+docker exec postharvest-ollama ollama pull gemma4:e2b
 ```
+
+> **Remote Ollama**: if your Ollama instance is on a different machine, set `OLLAMA_BASE_URL` to its network address (e.g. `http://192.168.1.50:11434`). No other changes are needed.
 
 ### 4. Initialise the database
 
@@ -304,8 +317,14 @@ llm = LLMClient()
 print('Connected:', llm.check_connection())
 "
 
-# Ollama (if configured)
-curl -s http://localhost:11434/api/tags | python3 -m json.tool
+# Ollama (if configured) — verify the server is reachable and model is available
+poetry run python -c "
+from src.llm.client import LLMClient
+llm = LLMClient(provider='ollama')
+print('Connected:', llm.check_connection())
+"
+# Or check directly:
+curl -s http://<ollama-host>:11434/api/tags | python3 -m json.tool
 ```
 
 **2. Embedding generation**
@@ -635,11 +654,18 @@ poetry shell
 ### LLM connection errors
 
 ```bash
-# Verify OpenAI key is loaded
-poetry run python -c "from src.config.settings import settings; print(bool(settings.openai_api_key))"
+# Verify the configured provider and model
+poetry run python -c "from src.config.settings import settings; print(settings.llm_provider, settings.ollama_model or settings.openai_model)"
 
 # Quick connection test
 poetry run python -c "from src.llm.client import LLMClient; LLMClient().check_connection()"
+```
+
+For Ollama specifically: confirm the host is reachable and the model has been pulled.
+
+```bash
+curl -s http://<ollama-host>:11434/api/tags | python3 -m json.tool
+# Should list gemma4:e2b under "models"
 ```
 
 ### PostgreSQL connection refused
@@ -666,9 +692,10 @@ VectorDBClient().ensure_collection(recreate=True)
 
 ### Slow LLM inference (Ollama)
 
-- Switch to quantised model: `OLLAMA_MODEL=llama3.1:8b-q4_0`
-- Enable GPU in `docker-compose.yml` (uncomment `deploy.resources.reservations.devices`)
-- Switch to OpenAI `gpt-4o-mini` for production – significantly faster
+- Confirm your Ollama host has enough RAM (Gemma4 E2b needs ~2–3 GB; larger models need more)
+- Enable GPU acceleration on the Ollama host for a significant speed boost
+- Tune `OLLAMA_MAX_TOKENS` down if you don't need long responses (reduces per-call latency)
+- For production throughput, switch to OpenAI `gpt-4o-mini`
 
 ---
 
@@ -695,11 +722,13 @@ CRAWL_MAX_DEPTH=2
 EMBEDDING_BATCH_SIZE=16
 ```
 
-### Fully local (Ollama, no API costs)
+### Fully local (Ollama + Gemma4 E2b, no API costs)
 
 ```env
 LLM_PROVIDER=ollama
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_BASE_URL=http://<ollama-host>:11434
+OLLAMA_MODEL=gemma4:e2b
+OLLAMA_MAX_TOKENS=2048
 EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL_LOCAL=all-MiniLM-L6-v2
 CRAWL_DELAY_SECONDS=3.0
