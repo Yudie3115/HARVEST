@@ -59,7 +59,10 @@ services:
     networks:
       - scraper-network
 
-  # Ollama - LLM serving (Optional - uncomment if using Ollama instead of OpenAI)
+  # Ollama - LLM serving
+  # Only needed if you want to run Ollama inside Docker.
+  # If your Ollama instance is on another machine, leave this commented out
+  # and set OLLAMA_BASE_URL=http://<host>:11434 in your .env instead.
   # ollama:
   #   image: ollama/ollama:latest
   #   container_name: postharvest-ollama
@@ -105,6 +108,8 @@ services:
       DATABASE_URL: postgresql://scraper:ph_scraper_pass@postgres:5432/postharvest_scraper
       MINIO_ENDPOINT: minio:9000
       QDRANT_URL: http://qdrant:6333
+      # OLLAMA_BASE_URL is read from .env — point it at your Ollama host, e.g.:
+      # OLLAMA_BASE_URL: http://192.168.1.50:11434
     volumes:
       - hf-cache:/root/.cache/huggingface
     depends_on:
