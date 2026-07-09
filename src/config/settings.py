@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     crawl_max_depth: int = Field(default=4)
     crawl_timeout_seconds: int = Field(default=30)
     crawl_max_retries: int = Field(default=3)
+    crawl_unverify_ssl: str = Field(default="")
     
     # Processing
     relevance_threshold: float = Field(default=6.0)
@@ -152,6 +153,21 @@ class Settings(BaseSettings):
         if self.aphlis_enabled:
             sites.append("aphlis")
         return sites
+
+    @property
+    def crawl_unverify_ssl_sites(self) -> set[str]:
+        """Return site names that should skip SSL verification."""
+        return {
+            site.strip().lower()
+            for site in self.crawl_unverify_ssl.split(",")
+            if site.strip()
+        }
+
+    def verify_ssl_for_site(self, site_name: str | None) -> bool:
+        """Return whether HTTP clients should verify SSL for a site."""
+        if not site_name:
+            return True
+        return site_name.lower() not in self.crawl_unverify_ssl_sites
 
 
 # Global settings instance

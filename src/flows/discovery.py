@@ -53,7 +53,8 @@ def crawl_site(site_name: str, max_urls: int = 1000) -> List[str]:
     client = httpx.Client(
         headers=headers,
         timeout=settings.crawl_timeout_seconds,
-        follow_redirects=True
+        follow_redirects=True,
+        verify=settings.verify_ssl_for_site(site_name),
     )
     
     depth = 0

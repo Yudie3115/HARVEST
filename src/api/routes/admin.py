@@ -310,6 +310,7 @@ def get_config(_: str = Depends(require_admin)):
             "relevance_threshold": settings.relevance_threshold,
             "chunk_size": settings.chunk_size,
             "chunk_overlap": settings.chunk_overlap,
+            "unverify_ssl_sites": sorted(settings.crawl_unverify_ssl_sites),
         },
         "services": {
             "database_url": _mask(str(settings.database_url)),

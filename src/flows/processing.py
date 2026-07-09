@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 from prefect import flow, task
 
+from src.config.site_configs import get_site_name_for_url
 from src.config.settings import settings
 from src.llm.client import LLMClient
 from src.llm.embeddings import EmbeddingClient
@@ -63,6 +64,7 @@ def download_document(document_id: str, url: str) -> Optional[Dict]:
     logger.info(f"Downloading: {url}")
 
     headers = {"User-Agent": settings.crawl_user_agent}
+    site_name = get_site_name_for_url(url)
     db = PostgresClient()
 
     try:
@@ -70,6 +72,7 @@ def download_document(document_id: str, url: str) -> Optional[Dict]:
             headers=headers,
             timeout=settings.crawl_timeout_seconds,
             follow_redirects=True,
+            verify=settings.verify_ssl_for_site(site_name),
         ) as client:
             response = client.get(url)
             response.raise_for_status()

@@ -2,6 +2,8 @@
 Site-specific crawl configurations
 """
 from typing import Literal
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, HttpUrl
 
 
@@ -299,3 +301,22 @@ def get_site_config(site_name: str) -> SiteConfig:
 def get_all_sites() -> list[str]:
     """Get list of all configured sites"""
     return list(SITE_CONFIGS.keys())
+
+
+def get_site_name_for_url(url: str) -> str | None:
+    """Find the configured site that owns a URL."""
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return None
+
+    hostname = hostname.lower().removeprefix("www.")
+    for site_name, config in SITE_CONFIGS.items():
+        site_hostname = urlparse(str(config.url)).hostname
+        if not site_hostname:
+            continue
+
+        site_hostname = site_hostname.lower().removeprefix("www.")
+        if hostname == site_hostname or hostname.endswith(f".{site_hostname}"):
+            return site_name
+
+    return None
