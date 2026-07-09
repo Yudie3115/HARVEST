@@ -24,8 +24,8 @@ from src.storage.postgres import PostgresClient
     name="crawl_site",
     retries=2,
     retry_delay_seconds=30,
-    cache_key_fn=lambda context, params: f"crawl_{params['site_name']}",
-    cache_expiration=timedelta(hours=6)
+    # cache_key_fn=lambda context, params: f"crawl_{params['site_name']}",
+    # cache_expiration=timedelta(hours=6)
 )
 def crawl_site(site_name: str, max_urls: int = 1000) -> List[str]:
     """
