@@ -1,0 +1,61 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: chat SourcesSidebar renders on the right →
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e11]: Sources
+        - generic [ref=e12]: "1"
+      - button "Close sources" [ref=e13] [cursor=pointer]
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: ①
+        - generic [ref=e20]: Test Site
+        - generic [ref=e21]: 87%
+      - paragraph [ref=e22]: Maize storage guide
+      - paragraph [ref=e23]: example.com/maize-storage
+      - generic [ref=e24]:
+        - paragraph [ref=e25]:
+          - text: Storage losses vary by
+          - strong [ref=e26]: method
+          - text: .
+        - table [ref=e28]:
+          - rowgroup [ref=e29]:
+            - row [ref=e30]:
+              - columnheader "Method" [ref=e31]
+              - columnheader "Loss %" [ref=e32]
+          - rowgroup [ref=e33]:
+            - row [ref=e34]:
+              - cell "Hermetic bag" [ref=e35]
+              - cell "2%" [ref=e36]
+            - row [ref=e37]:
+              - cell "Open sack" [ref=e38]
+              - cell "15%" [ref=e39]
+      - link "Open source" [ref=e40] [cursor=pointer]:
+        - /url: https://example.com/maize-storage
+    - paragraph [ref=e44]: Sources retrieved from the indexed knowledge base. Content may not reflect the most recent updates at each source.
+  - generic [ref=e45]:
+    - heading "admin QA source chunk render" [level=2] [ref=e46]
+    - generic [ref=e47]:
+      - heading "Findings" [level=3] [ref=e48]
+      - paragraph [ref=e49]:
+        - text: Key
+        - strong [ref=e50]: loss rates
+        - text: "by method:"
+      - table [ref=e52]:
+        - rowgroup [ref=e53]:
+          - row [ref=e54]:
+            - columnheader "Method" [ref=e55]
+            - columnheader "Loss %" [ref=e56]
+            - columnheader "Notes" [ref=e57]
+        - rowgroup [ref=e58]:
+          - row [ref=e59]:
+            - cell "Hermetic bag" [ref=e60]
+            - cell "2%" [ref=e61]
+            - cell "Best practice" [ref=e62]
+          - row [ref=e63]:
+            - cell "Open sack" [ref=e64]
+            - cell "15%" [ref=e65]
+            - cell "Common but risky" [ref=e66]
+      - list [ref=e67]:
+        - listitem [ref=e68]: Use airtight storage
+        - listitem [ref=e69]: Monitor moisture

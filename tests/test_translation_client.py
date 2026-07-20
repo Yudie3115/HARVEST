@@ -159,6 +159,46 @@ class TestTranslate:
         # No \n\n in output (all sentence chunks from same paragraph)
         assert "\n\n" not in result
 
+    def test_long_paragraph_with_markdown_table_preserves_line_breaks(self):
+        """A markdown table >500 chars with no blank lines must keep one row per line.
+
+        Regression test: chunking used to split on ". " for any paragraph over
+        the chunk size. Periods inside cell text (e.g. "e.g." or decimals) land
+        mid-row, so a single API call payload can span two different table rows
+        joined by an embedded "\\n" — real translation APIs are not guaranteed to
+        preserve that embedded newline, and the sentence groups get rejoined with
+        a plain space regardless, destroying the row-per-line table markup.
+        """
+        client = _make_client()
+        header = "| Method | Loss % | Notes |\n| --- | --- | --- |\n"
+        row = "| Hermetic bag | 2.5% | Best practice for smallholder farmers e.g. maize and beans. |\n"
+        table = header + row * 8  # no blank lines anywhere, > 500 chars total
+        assert len(table) > 500
+        assert "\n\n" not in table
+
+        call_payloads = []
+
+        def fake_post(url, json, headers):
+            call_payloads.append(json["text"])
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {"output": {"translated_text": f"chunk{len(call_payloads)}"}}
+            return resp
+
+        with patch("httpx.Client") as mock_httpx_cls:
+            mock_http = MagicMock()
+            mock_http.__enter__ = MagicMock(return_value=mock_http)
+            mock_http.__exit__ = MagicMock(return_value=False)
+            mock_http.post.side_effect = fake_post
+            mock_httpx_cls.return_value = mock_http
+            result = client.translate(table, "eng", "lug")
+
+        # No single API call should ever bundle content from two different
+        # original table rows together (i.e. span an original line break).
+        assert not any("|\n|" in payload for payload in call_payloads)
+        # The reassembled result must keep one row per line, matching the input.
+        assert result.count("\n") == table.count("\n")
+
     def test_translate_to_english_propagates_error(self):
         """translate_to_english raises TranslationError when API is down."""
         from src.translation import TranslationError

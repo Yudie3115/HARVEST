@@ -207,47 +207,37 @@ class TranslationClient:
             + (f" (last status: {last_status})" if last_status else "")
         ) from last_exc
 
-    def _split_text(self, text: str) -> list[tuple[str, str]]:
-        """Split text on paragraph boundaries, then sentence boundaries if needed."""
-        paragraphs = text.split("\n\n")
-        chunks: list[tuple[str, str]] = []
-        for para in paragraphs:
-            if len(para) <= _CHUNK_SIZE:
-                chunks.append(("para", para))
-            else:
-                # Split on sentence boundaries
-                sentences = para.split(". ")
-                for j, s in enumerate(sentences):
-                    if s.strip():
-                        # Re-append period to all but the last fragment
-                        chunk_text = s if j == len(sentences) - 1 else s + "."
-                        chunks.append(("sent", chunk_text))
-        return chunks
-
     def _translate_chunked(
         self, text: str, source_lang: str, target_lang: str
     ) -> str:
-        """Translate multi-chunk text, preserving paragraph structure."""
-        raw_chunks = self._split_text(text)
-        translated: list[tuple[str, str]] = []
-        for kind, chunk in raw_chunks:
-            t = self._translate_chunk(chunk, source_lang, target_lang)
-            translated.append((kind, t))
+        """Translate text longer than _CHUNK_SIZE, one line at a time.
 
-        # Rejoin: paragraph boundaries → \n\n, sentence boundaries → space
-        result_parts: list[str] = []
-        i = 0
-        while i < len(translated):
-            kind, t = translated[i]
-            if kind == "para":
-                result_parts.append(t)
-                i += 1
+        Never sends a chunk spanning more than one original line to the
+        translation API — markdown constructs (table rows, list items,
+        headings) depend on line breaks, and an API call payload merging
+        two lines together can't be trusted to preserve that boundary in
+        its response. A single line still over _CHUNK_SIZE falls back to
+        sentence-boundary splitting, rejoined with spaces.
+        """
+        lines = text.split("\n")
+        translated_lines = []
+        for line in lines:
+            if not line.strip():
+                translated_lines.append(line)
+            elif len(line) <= _CHUNK_SIZE:
+                translated_lines.append(self._translate_chunk(line, source_lang, target_lang))
             else:
-                # Accumulate consecutive sentence chunks into one paragraph
-                sent_group = [t]
-                i += 1
-                while i < len(translated) and translated[i][0] == "sent":
-                    sent_group.append(translated[i][1])
-                    i += 1
-                result_parts.append(" ".join(sent_group))
-        return "\n\n".join(result_parts)
+                translated_lines.append(self._translate_long_line(line, source_lang, target_lang))
+        return "\n".join(translated_lines)
+
+    def _translate_long_line(self, line: str, source_lang: str, target_lang: str) -> str:
+        """Translate a single line too long for one request, split on sentences."""
+        sentences = line.split(". ")
+        translated: list[str] = []
+        for j, s in enumerate(sentences):
+            if not s.strip():
+                continue
+            # Re-append period to all but the last fragment
+            chunk_text = s if j == len(sentences) - 1 else s + "."
+            translated.append(self._translate_chunk(chunk_text, source_lang, target_lang))
+        return " ".join(translated)

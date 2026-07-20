@@ -1,3 +1,7 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { mdComponents } from '../lib/markdownComponents'
+
 function SourceCard({ source, index }) {
   const siteName = source.site_name
     ? source.site_name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -97,22 +101,21 @@ function SourceCard({ source, index }) {
 
       {/* Snippet */}
       {source.snippet && (
-        <p
+        <div
           style={{
-            margin: 0,
             fontSize: 12,
             fontFamily: 'Outfit, system-ui, sans-serif',
             color: '#6a7a6a',
             lineHeight: 1.5,
             fontStyle: 'italic',
-            display: '-webkit-box',
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: 'vertical',
+            maxHeight: '4.5em',
             overflow: 'hidden',
           }}
         >
-          {source.snippet}
-        </p>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            {source.snippet}
+          </ReactMarkdown>
+        </div>
       )}
 
       {/* Open link */}

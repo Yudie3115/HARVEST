@@ -8,6 +8,7 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Alert } from '../../components/ui/alert'
 import { Progress } from '../../components/ui/progress'
 import { adminApi } from '../api'
+import { adminMdComponents } from '../../lib/adminMarkdownComponents'
 
 export default function QAPage() {
   const [question, setQuestion] = useState('')
@@ -110,8 +111,8 @@ export default function QAPage() {
           {/* Answer */}
           <Alert variant="success">
             <div className="text-[11px] font-semibold text-green-400 uppercase tracking-wider mb-2">Answer</div>
-            <div className="prose prose-sm prose-invert max-w-none text-[13px] text-green-100/90">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <div className="text-[13px] text-green-100/90">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={adminMdComponents}>
                 {result.answer || result.response || '(no answer returned)'}
               </ReactMarkdown>
             </div>
@@ -152,9 +153,11 @@ export default function QAPage() {
                       </div>
                       {isOpen && (
                         <CardContent className="pt-0 border-t border-admin-border">
-                          <p className="text-[12px] text-zinc-300 leading-relaxed mb-3 whitespace-pre-wrap">
-                            {payload.text || '(no text)'}
-                          </p>
+                          <div className="text-[12px] text-zinc-300 mb-3">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={adminMdComponents}>
+                              {payload.text || '(no text)'}
+                            </ReactMarkdown>
+                          </div>
                           <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-admin-muted">
                             {payload.topics?.length > 0 && <span>Topics: {payload.topics.join(', ')}</span>}
                             {payload.crops?.length > 0 && <span>Crops: {payload.crops.join(', ')}</span>}
