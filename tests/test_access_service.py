@@ -525,3 +525,140 @@ class TestRedeemWebCode:
             assert result.token
         finally:
             db.close()
+
+
+class TestIsCodeFormat:
+    def test_well_formed_three_word_code_is_true(self):
+        from src.api.services.access_service import is_code_format
+        assert is_code_format("mango-river-granary") is True
+
+    def test_messy_but_well_formed_code_is_true(self):
+        from src.api.services.access_service import is_code_format
+        assert is_code_format("  Mango   River   Granary  ") is True
+
+    def test_free_text_question_is_false(self):
+        from src.api.services.access_service import is_code_format
+        assert is_code_format("How do I dry maize?") is False
+
+    def test_two_word_text_is_false(self):
+        from src.api.services.access_service import is_code_format
+        assert is_code_format("hello there") is False
+
+
+class TestResolveWhatsappGrant:
+    def test_no_grant_returns_none(self):
+        from src.api.services.access_service import resolve_whatsapp_grant
+        db = _make_db_session()
+        try:
+            assert resolve_whatsapp_grant(db, "+256799999999") is None
+        finally:
+            db.close()
+
+    def test_active_grant_resolves(self):
+        from src.api.services.access_service import (
+            resolve_whatsapp_grant, hash_identifier, DOMAIN_WHATSAPP_GRANT,
+        )
+        from src.storage.models import AccessGrant, ChannelEnum
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db)
+            # Suffixed per the idempotency lesson from d92fa14/d7c3cd8: this raw
+            # insert creates a status="active" AccessGrant, which is covered by
+            # the partial unique index on (channel, identifier_hash) WHERE
+            # status = 'active'. A fixed literal would collide with a leftover
+            # row from a previous run against this shared, persistent dev DB.
+            phone = f"+256788888888-{uuid.uuid4().hex}"
+            grant = AccessGrant(
+                access_code_id=code.id, channel=ChannelEnum.whatsapp,
+                identifier_hash=hash_identifier(phone, domain=DOMAIN_WHATSAPP_GRANT),
+                status="active",
+            )
+            db.add(grant)
+            db.commit()
+
+            resolved = resolve_whatsapp_grant(db, phone)
+            assert resolved is not None
+            assert resolved.grant.id == grant.id
+        finally:
+            db.close()
+
+    def test_replaced_grant_is_not_resolved(self):
+        from src.api.services.access_service import (
+            resolve_whatsapp_grant, hash_identifier, DOMAIN_WHATSAPP_GRANT,
+        )
+        from src.storage.models import AccessGrant, ChannelEnum
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db)
+            # status="replaced" isn't covered by the partial unique index, but
+            # suffixed anyway for consistency/safety per the same lesson.
+            phone = f"+256777777777-{uuid.uuid4().hex}"
+            db.add(AccessGrant(
+                access_code_id=code.id, channel=ChannelEnum.whatsapp,
+                identifier_hash=hash_identifier(phone, domain=DOMAIN_WHATSAPP_GRANT),
+                status="replaced",
+            ))
+            db.commit()
+
+            assert resolve_whatsapp_grant(db, phone) is None
+        finally:
+            db.close()
+
+
+class TestRedeemWhatsappCode:
+    def test_unknown_code_raises_access_invalid(self):
+        from src.api.services.access_service import redeem_whatsapp_code, AccessInvalidError
+        db = _make_db_session()
+        try:
+            with pytest.raises(AccessInvalidError):
+                redeem_whatsapp_code(db, "+256766666666", "no-such-code")
+        finally:
+            db.close()
+
+    def test_first_time_redemption_creates_active_grant(self):
+        from src.api.services.access_service import (
+            create_access_code, redeem_whatsapp_code, hash_identifier, DOMAIN_WHATSAPP_GRANT,
+        )
+        db = _make_db_session()
+        try:
+            _, plaintext = create_access_code(
+                db, label="WA Group", monthly_limit=10, created_by="admin",
+            )
+            # Suffixed: this persists a status="active" AccessGrant via
+            # redeem_whatsapp_code, covered by the partial unique index.
+            phone = f"+256755555555-{uuid.uuid4().hex}"
+            result = redeem_whatsapp_code(db, phone, plaintext)
+
+            assert result.grant.status == "active"
+            assert result.grant.identifier_hash == hash_identifier(phone, domain=DOMAIN_WHATSAPP_GRANT)
+        finally:
+            db.close()
+
+    def test_rebinding_replaces_the_previous_active_grant(self):
+        from src.api.services.access_service import create_access_code, redeem_whatsapp_code
+        from src.storage.models import AccessGrant
+        db = _make_db_session()
+        try:
+            _, first_code = create_access_code(
+                db, label="WA Group A", monthly_limit=10, created_by="admin",
+            )
+            # Suffixed: the same lesson applies here even though the rebinding
+            # logic itself is written to tolerate a pre-existing active grant
+            # for this phone (that's the whole point of this test) — suffixing
+            # keeps each run's assertions about *this specific pair* of grants
+            # independent of any state left behind by earlier runs.
+            phone = f"+256744444444-{uuid.uuid4().hex}"
+            first_result = redeem_whatsapp_code(db, phone, first_code)
+
+            _, second_code = create_access_code(
+                db, label="WA Group B", monthly_limit=10, created_by="admin",
+            )
+            second_result = redeem_whatsapp_code(db, phone, second_code)
+
+            db.refresh(first_result.grant)
+            assert first_result.grant.status == "replaced"
+            assert first_result.grant.replaced_at is not None
+            assert second_result.grant.status == "active"
+            assert second_result.grant.id != first_result.grant.id
+        finally:
+            db.close()

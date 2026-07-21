@@ -318,3 +318,78 @@ def redeem_web_code(db: Session, raw_code: str) -> RedemptionResult:
     db.refresh(grant)
 
     return RedemptionResult(token=token, grant=grant, access_code=code_row)
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp grant resolution, redemption, and rebinding
+# ---------------------------------------------------------------------------
+
+_CODE_FORMAT_RE = re.compile(r"^[a-z]{2,}-[a-z]{2,}-[a-z]{2,}$")
+
+
+def is_code_format(text: str) -> bool:
+    """True iff *text* normalizes to a well-formed three-word access code."""
+    return bool(_CODE_FORMAT_RE.match(normalize_code(text)))
+
+
+def resolve_whatsapp_grant(db: Session, phone: str) -> ResolvedGrant | None:
+    """Resolve the active WhatsApp AccessGrant for *phone*, or None if unbound."""
+    identifier_hash = hash_identifier(phone, domain=DOMAIN_WHATSAPP_GRANT)
+    grant = (
+        db.query(AccessGrant)
+        .filter(
+            AccessGrant.channel == ChannelEnum.whatsapp,
+            AccessGrant.identifier_hash == identifier_hash,
+            AccessGrant.status == AccessGrantStatusEnum.active,
+        )
+        .first()
+    )
+    if grant is None:
+        return None
+    access_code = db.get(AccessCode, grant.access_code_id)
+    return ResolvedGrant(grant=grant, access_code=access_code)
+
+
+def redeem_whatsapp_code(db: Session, phone: str, raw_code: str) -> RedemptionResult:
+    """
+    Redeem a WhatsApp access code. If *phone* already has an active grant (rebinding —
+    e.g. its code was revoked and the admin issued a replacement), mark it replaced
+    and create the new active grant in the same transaction.
+    """
+    normalized = normalize_code(raw_code)
+    code_row = (
+        db.query(AccessCode)
+        .filter(AccessCode.code_hash == hash_code(normalized))
+        .first()
+    )
+    if code_row is None:
+        raise AccessInvalidError("This access code is not recognized.")
+
+    require_active_code(code_row)
+
+    identifier_hash = hash_identifier(phone, domain=DOMAIN_WHATSAPP_GRANT)
+    previous = (
+        db.query(AccessGrant)
+        .filter(
+            AccessGrant.channel == ChannelEnum.whatsapp,
+            AccessGrant.identifier_hash == identifier_hash,
+            AccessGrant.status == AccessGrantStatusEnum.active,
+        )
+        .first()
+    )
+    if previous is not None:
+        previous.status = AccessGrantStatusEnum.replaced
+        previous.replaced_at = datetime.now(timezone.utc)
+        db.flush()
+
+    grant = AccessGrant(
+        access_code_id=code_row.id,
+        channel=ChannelEnum.whatsapp,
+        identifier_hash=identifier_hash,
+        status=AccessGrantStatusEnum.active,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(grant)
+
+    return RedemptionResult(token="", grant=grant, access_code=code_row)
