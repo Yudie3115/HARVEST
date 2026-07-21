@@ -87,7 +87,10 @@ class Document(Base):
     discovered_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     processed_at = Column(DateTime, index=True)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
-    
+    publicly_visible = Column(Boolean, nullable=False, default=False, server_default="false")
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    published_by = Column(String(100), nullable=True)
+
     # Document metadata
     title = Column(Text)
     document_type = Column(String(50))
@@ -399,6 +402,79 @@ class RedemptionAttempt(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     identifier_hash = Column(String(64), nullable=False, index=True)
     attempted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Q&A catalogue and background job models (schema only in this phase — the
+# candidate-scoring worker and publication pipeline are built in a later phase)
+# ---------------------------------------------------------------------------
+
+class CatalogueStatusEnum(str, enum.Enum):
+    pending = "pending"
+    publishing = "publishing"
+    approved = "approved"
+    publish_failed = "publish_failed"
+    rejected = "rejected"
+    retracted = "retracted"
+
+
+class CatalogueEntry(Base):
+    """A reusable Q&A pair distilled from a successful live chat answer"""
+    __tablename__ = "catalogue_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    question_en = Column(Text, nullable=False)
+    answer_en = Column(Text, nullable=False)
+    question_translations = Column(JSONB, nullable=True)
+    answer_translations = Column(JSONB, nullable=True)
+    embedding = Column(ARRAY(Float), nullable=True)
+    status = Column(
+        SQLEnum(CatalogueStatusEnum),
+        nullable=False,
+        default=CatalogueStatusEnum.pending,
+        index=True,
+    )
+    source_message_id = Column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id"), nullable=True
+    )
+    source_chunk_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    grounding_score = Column(Float, nullable=True)
+    llm_score = Column(Float, nullable=True)
+    served_count = Column(Integer, nullable=False, default=0)
+    helpful_count = Column(Integer, nullable=False, default=0)
+    candidate_duplicate_count = Column(Integer, nullable=False, default=0)
+    publish_error = Column(Text, nullable=True)
+    publish_attempts = Column(Integer, nullable=False, default=0)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class BackgroundJobStatusEnum(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
+class BackgroundJob(Base):
+    """Durable job/outbox row, claimed via SELECT ... FOR UPDATE SKIP LOCKED"""
+    __tablename__ = "background_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_type = Column(String(50), nullable=False, index=True)
+    payload = Column(JSONB, nullable=False)
+    status = Column(
+        SQLEnum(BackgroundJobStatusEnum),
+        nullable=False,
+        default=BackgroundJobStatusEnum.pending,
+        index=True,
+    )
+    attempts = Column(Integer, nullable=False, default=0)
+    available_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # Indexes for common queries

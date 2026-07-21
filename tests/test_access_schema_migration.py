@@ -34,3 +34,14 @@ def test_global_usage_counter_singleton_seeded():
     assert row[0] == 1
     assert row[1] == 0
     engine.dispose()
+
+
+def test_publication_catalogue_and_job_tables_exist():
+    engine = create_engine(str(settings.database_url))
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    assert {"catalogue_entries", "background_jobs"} <= tables
+
+    document_columns = {c["name"] for c in inspector.get_columns("documents")}
+    assert {"publicly_visible", "published_at", "published_by"} <= document_columns
+    engine.dispose()
