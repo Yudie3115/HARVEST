@@ -1,9 +1,24 @@
+import { NavLink } from 'react-router-dom'
+
+const navLinkStyle = ({ isActive }) => ({
+  fontFamily: 'Outfit, system-ui, sans-serif',
+  fontSize: 13,
+  fontWeight: 500,
+  color: isActive ? '#8ecfaa' : '#d4cfc6',
+  textDecoration: 'none',
+  padding: '4px 2px',
+  borderBottom: isActive ? '1px solid #6ab08a' : '1px solid transparent',
+})
+
 export default function Header() {
   return (
     <header
       style={{
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '8px',
         padding: '12px 16px',
         borderBottom: '1px solid #1e2a1e',
         background: 'rgba(14,20,17,0.96)',
@@ -51,6 +66,15 @@ export default function Header() {
           </span>
         </div>
       </div>
+
+      <nav style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <NavLink to="/" end style={navLinkStyle}>
+          Chat
+        </NavLink>
+        <NavLink to="/documents" style={navLinkStyle}>
+          Documents
+        </NavLink>
+      </nav>
     </header>
   )
 }

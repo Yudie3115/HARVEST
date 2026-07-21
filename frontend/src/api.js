@@ -24,6 +24,35 @@ export async function getHistory(sessionId) {
   return res.json()
 }
 
+export async function getFacets() {
+  const res = await fetch(`${BASE_URL}/library/facets`)
+  if (!res.ok) throw new Error(`Failed to load facets: ${res.status}`)
+  return res.json()
+}
+
+export async function getDocuments({ topic, crop, region, q, offset = 0, limit = 20 } = {}) {
+  const params = new URLSearchParams()
+  if (topic) params.set('topic', topic)
+  if (crop) params.set('crop', crop)
+  if (region) params.set('region', region)
+  if (q) params.set('q', q)
+  params.set('offset', String(offset))
+  params.set('limit', String(limit))
+  const res = await fetch(`${BASE_URL}/library/documents?${params.toString()}`)
+  if (!res.ok) throw new Error(`Failed to load documents: ${res.status}`)
+  return res.json()
+}
+
+export async function getDocumentDetail(id) {
+  const res = await fetch(`${BASE_URL}/library/documents/${encodeURIComponent(id)}`)
+  if (!res.ok) {
+    const err = new Error(`Failed to load document: ${res.status}`)
+    err.status = res.status
+    throw err
+  }
+  return res.json()
+}
+
 export async function getChatModels() {
   const res = await fetch(`${BASE_URL}/chat/models`)
   if (!res.ok) throw new Error(`Failed to load chat models: ${res.status}`)

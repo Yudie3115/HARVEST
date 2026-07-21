@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import ChatApp from './ChatApp'
+import DocumentsPage from './library/pages/DocumentsPage'
+import DocumentDetailPage from './library/pages/DocumentDetailPage'
 import LoginPage from './admin/LoginPage'
 import AdminLayout from './admin/AdminLayout'
 import Overview from './admin/pages/Overview'
@@ -23,6 +25,10 @@ export default function App() {
     <Routes>
       {/* Chat interface */}
       <Route path="/" element={<ChatApp />} />
+
+      {/* Public documents library */}
+      <Route path="/documents" element={<DocumentsPage />} />
+      <Route path="/documents/:id" element={<DocumentDetailPage />} />
 
       {/* Admin login */}
       <Route path="/admin/login" element={<LoginPage />} />
