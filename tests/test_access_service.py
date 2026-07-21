@@ -210,7 +210,7 @@ class TestResolveWebGrant:
         db = _make_db_session()
         try:
             code = _insert_access_code(db)
-            token = "web-token-abc"
+            token = f"web-token-abc-{uuid.uuid4().hex}"
             grant = AccessGrant(
                 id=uuid.uuid4(),
                 access_code_id=code.id,
@@ -234,7 +234,7 @@ class TestResolveWebGrant:
         db = _make_db_session()
         try:
             code = _insert_access_code(db, status="revoked")
-            token = "web-token-revoked"
+            token = f"web-token-revoked-{uuid.uuid4().hex}"
             db.add(AccessGrant(
                 id=uuid.uuid4(), access_code_id=code.id, channel=ChannelEnum.web,
                 identifier_hash=hash_token(token), status="active",
@@ -261,6 +261,35 @@ class TestRequireActiveCode:
 
 
 class TestReserveQuota:
+    @pytest.fixture(autouse=True)
+    def _reset_global_counter_before_and_after(self):
+        """Reset the shared `global_usage_counters` singleton (id=1) to a
+        clean state (usage_count=0, period_start=current UTC month start)
+        both before and after every test in this class.
+
+        This must use real, committed UPDATE statements rather than a
+        db.rollback()-based transactional fixture: the singleton row is
+        shared process-wide (not per-test), and
+        test_concurrent_reservations_never_exceed_the_code_limit below
+        spins up separate threads with their own sessions that issue real
+        commits against it. A rollback in this fixture's own session would
+        never see, and could not undo, commits made by other sessions/
+        threads. So cleanup has to be an explicit real UPDATE + commit
+        against the persistent DB, matching how the row actually gets
+        mutated.
+        """
+        db = _make_db_session()
+        try:
+            _reset_global_counter(db, usage_count=0)
+        finally:
+            db.close()
+        yield
+        db = _make_db_session()
+        try:
+            _reset_global_counter(db, usage_count=0)
+        finally:
+            db.close()
+
     def test_successful_reservation_increments_both_counters(self):
         from src.api.services.access_service import reserve_quota
         db = _make_db_session()
