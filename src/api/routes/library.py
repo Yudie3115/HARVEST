@@ -8,12 +8,13 @@ excluded unless public_source_url is set. Relevance alone never grants visibilit
 """
 import time
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db
 from src.config.settings import settings
+from src.storage.models import Document, DocumentClassification, DocumentStatus
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -69,3 +70,71 @@ def _get_cached_facets(db: Session) -> dict:
 def get_facets(db: Session = Depends(get_db)) -> dict:
     """Distinct topic/crop/region values with counts, scoped to publicly visible documents."""
     return _get_cached_facets(db)
+
+
+def _visible_documents_query(db: Session):
+    return (
+        db.query(Document, DocumentClassification)
+        .join(DocumentClassification, DocumentClassification.document_id == Document.id)
+        .filter(
+            Document.status == DocumentStatus.PROCESSED,
+            DocumentClassification.relevance_score >= settings.relevance_threshold,
+            Document.publicly_visible.is_(True),
+            or_(
+                ~Document.url.startswith("upload://"),
+                Document.public_source_url.isnot(None),
+            ),
+        )
+    )
+
+
+def _source_url(doc: Document) -> str:
+    return doc.public_source_url if doc.public_source_url else doc.url
+
+
+_MAX_QUERY_LENGTH = 200
+_MAX_FACET_VALUE_LENGTH = 100
+
+
+@router.get("/documents")
+def list_documents(
+    topic: str | None = Query(default=None, max_length=_MAX_FACET_VALUE_LENGTH),
+    crop: str | None = Query(default=None, max_length=_MAX_FACET_VALUE_LENGTH),
+    region: str | None = Query(default=None, max_length=_MAX_FACET_VALUE_LENGTH),
+    q: str | None = Query(default=None, max_length=_MAX_QUERY_LENGTH),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Paginated, filterable list of publicly visible documents."""
+    query = _visible_documents_query(db)
+
+    if topic:
+        query = query.filter(DocumentClassification.topics.any(topic))
+    if crop:
+        query = query.filter(DocumentClassification.crops.any(crop))
+    if region:
+        query = query.filter(DocumentClassification.regions.any(region))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(Document.title.ilike(like), DocumentClassification.summary.ilike(like))
+        )
+
+    total = query.count()
+    rows = query.order_by(Document.discovered_at.desc()).offset(offset).limit(limit).all()
+
+    items = [
+        {
+            "id": str(doc.id),
+            "title": doc.title,
+            "summary": classification.summary,
+            "document_category": classification.document_category,
+            "topics": classification.topics or [],
+            "crops": classification.crops or [],
+            "regions": classification.regions or [],
+            "source_url": _source_url(doc),
+        }
+        for doc, classification in rows
+    ]
+    return {"items": items, "total": total, "offset": offset, "limit": limit}

@@ -246,3 +246,109 @@ class TestLibraryFacets:
         resp3 = client.get("/library/facets")
         after_reset = {t["value"] for t in resp3.json()["topics"]}
         assert "cache-test-topic" in after_reset
+
+
+class TestLibraryDocumentsList:
+    def test_only_publicly_visible_processed_above_threshold_appear(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        visible_id = _make_document(db, title="Visible Doc")
+        _make_document(db, title="Hidden — not visible", publicly_visible=False)
+        _make_document(db, title="Hidden — not processed", status="DISCOVERED")
+        _make_document(db, title="Hidden — low relevance", relevance_score=1.0)
+
+        resp = client.get("/library/documents")
+        assert resp.status_code == 200
+        body = resp.json()
+        ids = {item["id"] for item in body["items"]}
+        assert str(visible_id) in ids
+        assert len(ids) == 1
+
+    def test_filters_by_topic_crop_region_combined(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        match_id = _make_document(
+            db, title="Matches all filters",
+            topics=["storage"], crops=["maize"], regions=["central"],
+        )
+        _make_document(
+            db, title="Wrong crop",
+            topics=["storage"], crops=["beans"], regions=["central"],
+        )
+
+        resp = client.get(
+            "/library/documents",
+            params={"topic": "storage", "crop": "maize", "region": "central"},
+        )
+        body = resp.json()
+        ids = {item["id"] for item in body["items"]}
+        assert ids == {str(match_id)}
+
+    def test_q_searches_title_and_summary_case_insensitively(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        match_id = _make_document(db, title="Maize Drying Guide")
+        _make_document(db, title="Bean Storage Guide")
+
+        resp = client.get("/library/documents", params={"q": "drying"})
+        body = resp.json()
+        ids = {item["id"] for item in body["items"]}
+        assert ids == {str(match_id)}
+
+    def test_pagination_respects_offset_and_limit(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        for i in range(5):
+            _make_document(db, title=f"Paged Doc {i}", topics=[f"pagination-topic-{i}"])
+
+        resp = client.get(
+            "/library/documents",
+            params={"topic": "pagination-topic-2", "offset": 0, "limit": 20},
+        )
+        body = resp.json()
+        assert body["total"] == 1
+        assert len(body["items"]) == 1
+
+    def test_limit_is_clamped_to_a_maximum(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        resp = client.get("/library/documents", params={"limit": 500})
+        assert resp.status_code == 422  # FastAPI/Pydantic query validation rejects out-of-range
+
+    def test_upload_source_shows_public_source_url_not_internal_uri(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = uuid.uuid4()
+        upload_uri = f"upload://{doc_id}/guide.pdf"
+        _make_document(
+            db, title="Published Upload",
+            url=upload_uri, public_source_url="https://realsite.example/guide.pdf",
+            topics=["upload-list-topic"],
+        )
+
+        resp = client.get("/library/documents", params={"topic": "upload-list-topic"})
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["source_url"] == "https://realsite.example/guide.pdf"
+        assert items[0]["source_url"] != upload_uri
+
+    def test_empty_result_set_returns_empty_items_not_an_error(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        resp = client.get("/library/documents", params={"q": "no-such-document-marker-xyz"})
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
