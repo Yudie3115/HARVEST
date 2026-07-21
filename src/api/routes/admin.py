@@ -16,6 +16,7 @@ Endpoints:
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from uuid import UUID
 
 import httpx
 import jwt
@@ -28,6 +29,8 @@ from sqlalchemy.dialects.postgresql import DATE
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db, get_vector_db_client
+from src.api.models.requests import PublicationUpdateRequest
+from src.api.models.responses import PublicationUpdateResponse
 from src.config.settings import settings
 from src.storage.models import Document, DocumentStatus
 
@@ -187,6 +190,50 @@ def list_documents(
         )
 
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.patch("/documents/{document_id}/publication", response_model=PublicationUpdateResponse)
+def update_document_publication(
+    document_id: UUID,
+    body: PublicationUpdateRequest,
+    admin_username: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> PublicationUpdateResponse:
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    if body.public_source_url is not None:
+        doc.public_source_url = body.public_source_url
+
+    if body.publicly_visible:
+        if doc.status != DocumentStatus.PROCESSED:
+            raise HTTPException(status_code=400, detail="Only processed documents can be published.")
+
+        effective_public_url = body.public_source_url or doc.public_source_url
+        if doc.url.startswith("upload://"):
+            if not effective_public_url or not effective_public_url.startswith(("http://", "https://")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Uploaded documents require a public http(s) source URL before they can be published.",
+                )
+
+        doc.publicly_visible = True
+        doc.published_at = datetime.now(timezone.utc)
+        doc.published_by = admin_username
+    else:
+        doc.publicly_visible = False
+
+    db.commit()
+    db.refresh(doc)
+
+    return PublicationUpdateResponse(
+        id=str(doc.id),
+        publicly_visible=doc.publicly_visible,
+        published_at=doc.published_at.isoformat() if doc.published_at else None,
+        published_by=doc.published_by,
+        public_source_url=doc.public_source_url,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -75,3 +75,11 @@ class AccessStatusResponse(BaseModel):
     monthly_limit: int
     usage_count: int
     period_resets_at: str
+
+
+class PublicationUpdateResponse(BaseModel):
+    id: str
+    publicly_visible: bool
+    published_at: str | None
+    published_by: str | None
+    public_source_url: str | None

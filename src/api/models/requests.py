@@ -33,3 +33,8 @@ class UpdateAccessCodeRequest(BaseModel):
 
 class RedeemCodeRequest(BaseModel):
     code: str
+
+
+class PublicationUpdateRequest(BaseModel):
+    publicly_visible: bool
+    public_source_url: str | None = None
