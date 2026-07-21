@@ -1,3 +1,5 @@
+import { isSafeUrl } from './sanitize'
+
 export const mdComponents = {
   p: ({ children }) => (
     <p style={{ margin: '0 0 0.65em', lineHeight: 1.65 }} className="md-last-no-margin">
@@ -46,11 +48,19 @@ export const mdComponents = {
       {children}
     </blockquote>
   ),
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#6ab08a', textDecoration: 'underline', textUnderlineOffset: 3 }}>
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    if (!isSafeUrl(href)) {
+      // Unsafe or malformed scheme (javascript:, data:, mailto:, relative
+      // paths, etc.) — render the link text as inert plain text rather than
+      // a clickable anchor.
+      return <span style={{ color: '#d4cfc6' }}>{children}</span>
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#6ab08a', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+        {children}
+      </a>
+    )
+  },
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid #2a3329', margin: '0.8em 0' }} />,
   table: ({ children }) => (
     <div style={{ overflowX: 'auto', margin: '0.5em 0 0.8em' }}>
