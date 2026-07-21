@@ -17,6 +17,7 @@ from uuid import UUID
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -242,3 +243,78 @@ def reserve_quota(db: Session, access_code_id: UUID) -> None:
     code_row.usage_count += 1
     global_row.usage_count += 1
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Admin code creation and web code redemption
+# ---------------------------------------------------------------------------
+
+_MAX_CODE_GENERATION_ATTEMPTS = 10
+
+
+def create_access_code(
+    db: Session,
+    *,
+    label: str,
+    monthly_limit: int,
+    created_by: str,
+    organization_name: str | None = None,
+    contact_message: str | None = None,
+) -> tuple[AccessCode, str]:
+    """Generate a new access code, persist its hash, and return (row, plaintext_code)."""
+    for _ in range(_MAX_CODE_GENERATION_ATTEMPTS):
+        plaintext = generate_code()
+        code_row = AccessCode(
+            code_hash=hash_code(plaintext),
+            label=label,
+            organization_name=organization_name,
+            contact_message=contact_message,
+            monthly_limit=monthly_limit,
+            created_by=created_by,
+        )
+        db.add(code_row)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        db.refresh(code_row)
+        return code_row, plaintext
+
+    raise RuntimeError(
+        f"Could not generate a unique access code after {_MAX_CODE_GENERATION_ATTEMPTS} attempts."
+    )
+
+
+@dataclass
+class RedemptionResult:
+    token: str
+    grant: AccessGrant
+    access_code: AccessCode
+
+
+def redeem_web_code(db: Session, raw_code: str) -> RedemptionResult:
+    """Redeem a web access code, creating a new active AccessGrant with a fresh token."""
+    normalized = normalize_code(raw_code)
+    code_row = (
+        db.query(AccessCode)
+        .filter(AccessCode.code_hash == hash_code(normalized))
+        .first()
+    )
+    if code_row is None:
+        raise AccessInvalidError("This access code is not recognized.")
+
+    require_active_code(code_row)
+
+    token = generate_web_token()
+    grant = AccessGrant(
+        access_code_id=code_row.id,
+        channel=ChannelEnum.web,
+        identifier_hash=hash_token(token),
+        status=AccessGrantStatusEnum.active,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(grant)
+
+    return RedemptionResult(token=token, grant=grant, access_code=code_row)

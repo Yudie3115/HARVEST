@@ -412,3 +412,116 @@ class TestReserveQuota:
             assert final.usage_count == 1
         finally:
             verify_db.close()
+
+
+class TestCreateAccessCode:
+    def test_creates_row_and_returns_plaintext_code(self):
+        from src.api.services.access_service import create_access_code, hash_code, normalize_code
+        db = _make_db_session()
+        try:
+            code_row, plaintext = create_access_code(
+                db, label="Farmer Group A", monthly_limit=100, created_by="admin",
+            )
+            assert code_row.label == "Farmer Group A"
+            assert code_row.monthly_limit == 100
+            assert code_row.status == "active"
+            assert code_row.code_hash == hash_code(normalize_code(plaintext))
+            parts = plaintext.split("-")
+            assert len(parts) == 3
+        finally:
+            db.close()
+
+    def test_optional_fields_are_stored(self):
+        from src.api.services.access_service import create_access_code
+        db = _make_db_session()
+        try:
+            code_row, _ = create_access_code(
+                db, label="Farmer Group B", monthly_limit=50, created_by="admin",
+                organization_name="Kampala Co-op", contact_message="Call 0800-000",
+            )
+            assert code_row.organization_name == "Kampala Co-op"
+            assert code_row.contact_message == "Call 0800-000"
+        finally:
+            db.close()
+
+    def test_retries_on_hash_collision(self, monkeypatch):
+        """Force the first generated code to collide, verify a second attempt succeeds.
+
+        The second value is suffixed with a fresh uuid4 hex so its hash is unique
+        per test run — a fixed literal would collide with a previous run's row in
+        this shared, persistent dev database (code_hash has a unique constraint).
+        """
+        import src.api.services.access_service as svc
+        db = _make_db_session()
+        try:
+            existing, existing_plain = svc.create_access_code(
+                db, label="Existing", monthly_limit=10, created_by="admin",
+            )
+            unique_second = f"totally-different-words-{uuid.uuid4().hex}"
+            calls = iter([existing_plain, unique_second])
+            monkeypatch.setattr(svc, "generate_code", lambda: next(calls))
+
+            code_row, plaintext = svc.create_access_code(
+                db, label="New Group", monthly_limit=10, created_by="admin",
+            )
+            assert plaintext == unique_second
+            assert code_row.id != existing.id
+        finally:
+            db.close()
+
+
+class TestRedeemWebCode:
+    def test_unknown_code_raises_access_invalid(self):
+        from src.api.services.access_service import redeem_web_code, AccessInvalidError
+        db = _make_db_session()
+        try:
+            with pytest.raises(AccessInvalidError):
+                redeem_web_code(db, "no-such-code")
+        finally:
+            db.close()
+
+    def test_revoked_code_raises_access_revoked(self):
+        from src.api.services.access_service import create_access_code, redeem_web_code, AccessRevokedError
+        db = _make_db_session()
+        try:
+            code_row, plaintext = create_access_code(
+                db, label="Revoked Group", monthly_limit=10, created_by="admin",
+            )
+            code_row.status = "revoked"
+            db.commit()
+
+            with pytest.raises(AccessRevokedError):
+                redeem_web_code(db, plaintext)
+        finally:
+            db.close()
+
+    def test_successful_redemption_creates_active_web_grant(self):
+        from src.api.services.access_service import create_access_code, redeem_web_code, hash_token
+        from src.storage.models import AccessGrant
+        db = _make_db_session()
+        try:
+            code_row, plaintext = create_access_code(
+                db, label="Group C", monthly_limit=10, created_by="admin",
+            )
+            result = redeem_web_code(db, plaintext)
+
+            assert result.access_code.id == code_row.id
+            stored = db.query(AccessGrant).filter(AccessGrant.id == result.grant.id).one()
+            assert stored.channel == "web"
+            assert stored.status == "active"
+            assert stored.identifier_hash == hash_token(result.token)
+        finally:
+            db.close()
+
+    def test_redemption_is_case_and_whitespace_insensitive(self):
+        from src.api.services.access_service import create_access_code, redeem_web_code
+        db = _make_db_session()
+        try:
+            _, plaintext = create_access_code(
+                db, label="Group D", monthly_limit=10, created_by="admin",
+            )
+            messy = "  " + plaintext.upper().replace("-", "  ") + "  "
+            result = redeem_web_code(db, messy)  # should not raise
+            assert result.token
+        finally:
+            db.close()
