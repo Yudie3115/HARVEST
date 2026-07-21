@@ -662,3 +662,78 @@ class TestRedeemWhatsappCode:
             assert second_result.grant.id != first_result.grant.id
         finally:
             db.close()
+
+
+class TestRedemptionThrottling:
+    def test_under_limit_does_not_raise(self):
+        from src.api.services.access_service import check_redemption_throttle
+        db = _make_db_session()
+        try:
+            check_redemption_throttle(db, "+256733333333-under-limit")  # no exception
+        finally:
+            db.close()
+
+    def test_at_limit_raises_redemption_rate_limited(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "redemption_max_attempts_per_hour", 3)
+        from src.api.services.access_service import (
+            check_redemption_throttle, record_failed_redemption_attempt,
+            RedemptionRateLimitedError,
+        )
+        db = _make_db_session()
+        identifier = "+256722222222-at-limit"
+        try:
+            for _ in range(3):
+                record_failed_redemption_attempt(db, identifier)
+            with pytest.raises(RedemptionRateLimitedError):
+                check_redemption_throttle(db, identifier)
+        finally:
+            db.close()
+
+    def test_different_identifiers_are_independent(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "redemption_max_attempts_per_hour", 1)
+        from src.api.services.access_service import (
+            check_redemption_throttle, record_failed_redemption_attempt,
+        )
+        db = _make_db_session()
+        try:
+            record_failed_redemption_attempt(db, "+256711111111-a")
+            check_redemption_throttle(db, "+256711111111-b")  # independent identifier, no exception
+        finally:
+            db.close()
+
+    def test_clear_resets_the_window(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "redemption_max_attempts_per_hour", 1)
+        from src.api.services.access_service import (
+            check_redemption_throttle, record_failed_redemption_attempt,
+            clear_redemption_throttle,
+        )
+        db = _make_db_session()
+        identifier = "+256700111222-clear"
+        try:
+            record_failed_redemption_attempt(db, identifier)
+            clear_redemption_throttle(db, identifier)
+            check_redemption_throttle(db, identifier)  # window cleared, no exception
+        finally:
+            db.close()
+
+    def test_attempts_older_than_one_hour_do_not_count(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "redemption_max_attempts_per_hour", 1)
+        from src.api.services.access_service import check_redemption_throttle, hash_identifier, DOMAIN_REDEMPTION_THROTTLE
+        from src.storage.models import RedemptionAttempt
+        db = _make_db_session()
+        identifier = "+256700333444-stale"
+        try:
+            stale = RedemptionAttempt(
+                identifier_hash=hash_identifier(identifier, domain=DOMAIN_REDEMPTION_THROTTLE),
+                attempted_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+            db.add(stale)
+            db.commit()
+
+            check_redemption_throttle(db, identifier)  # only a 2h-old attempt, no exception
+        finally:
+            db.close()

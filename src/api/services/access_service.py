@@ -11,7 +11,7 @@ import hmac
 import re
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -28,6 +28,7 @@ from src.storage.models import (
     AccessGrantStatusEnum,
     ChannelEnum,
     GlobalUsageCounter,
+    RedemptionAttempt,
 )
 
 DOMAIN_ACCESS_CODE = "access_code"
@@ -393,3 +394,45 @@ def redeem_whatsapp_code(db: Session, phone: str, raw_code: str) -> RedemptionRe
     db.refresh(grant)
 
     return RedemptionResult(token="", grant=grant, access_code=code_row)
+
+
+# ---------------------------------------------------------------------------
+# Redemption throttling (one-hour sliding window on failed attempts)
+# ---------------------------------------------------------------------------
+
+_THROTTLE_WINDOW = timedelta(hours=1)
+
+
+def check_redemption_throttle(db: Session, identifier: str) -> None:
+    """Raise RedemptionRateLimitedError if *identifier* has too many recent failed attempts."""
+    identifier_hash = hash_identifier(identifier, domain=DOMAIN_REDEMPTION_THROTTLE)
+    cutoff = datetime.now(timezone.utc) - _THROTTLE_WINDOW
+    count = (
+        db.query(RedemptionAttempt)
+        .filter(
+            RedemptionAttempt.identifier_hash == identifier_hash,
+            RedemptionAttempt.attempted_at >= cutoff,
+        )
+        .count()
+    )
+    if count >= settings.redemption_max_attempts_per_hour:
+        raise RedemptionRateLimitedError(
+            "Too many invalid attempts. Please try again later."
+        )
+
+
+def record_failed_redemption_attempt(db: Session, identifier: str) -> None:
+    """Record one failed redemption attempt for *identifier*."""
+    db.add(RedemptionAttempt(
+        identifier_hash=hash_identifier(identifier, domain=DOMAIN_REDEMPTION_THROTTLE),
+    ))
+    db.commit()
+
+
+def clear_redemption_throttle(db: Session, identifier: str) -> None:
+    """Clear *identifier*'s throttle window (called after a successful redemption)."""
+    identifier_hash = hash_identifier(identifier, domain=DOMAIN_REDEMPTION_THROTTLE)
+    db.query(RedemptionAttempt).filter(
+        RedemptionAttempt.identifier_hash == identifier_hash
+    ).delete()
+    db.commit()

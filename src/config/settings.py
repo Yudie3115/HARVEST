@@ -111,6 +111,7 @@ class Settings(BaseSettings):
         default="change-this-access-hash-secret-in-production"
     )
     global_monthly_message_limit: int = Field(default=100000)
+    redemption_max_attempts_per_hour: int = Field(default=5)
 
     # Translation (Sunbird AI)
     sunbird_api_key: str = Field(default="")
