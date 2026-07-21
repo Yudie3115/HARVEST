@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from src.config.settings import settings
 from src.api.routes import admin, chat, health, session, whatsapp
+from src.api.services.access_service import AccessError, access_error_handler
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ app.add_middleware(
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(AccessError, access_error_handler)
 
 # Routers
 app.include_router(health.router)

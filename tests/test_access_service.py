@@ -103,3 +103,34 @@ class TestGenerateWebToken:
         token = generate_web_token()
         assert len(token) >= 32
         assert token != generate_web_token()
+
+
+class TestAccessErrors:
+    def test_error_codes_and_statuses_match_the_contract(self):
+        from src.api.services.access_service import (
+            AccessRequiredError, AccessInvalidError, AccessRevokedError,
+            SessionForbiddenError, QuotaExhaustedError, GlobalLimitReachedError,
+            RedemptionRateLimitedError,
+        )
+        expected = {
+            AccessRequiredError: ("access_required", 401),
+            AccessInvalidError: ("access_invalid", 401),
+            AccessRevokedError: ("access_revoked", 403),
+            SessionForbiddenError: ("session_forbidden", 403),
+            QuotaExhaustedError: ("quota_exhausted", 429),
+            GlobalLimitReachedError: ("global_limit_reached", 503),
+            RedemptionRateLimitedError: ("redemption_rate_limited", 429),
+        }
+        for cls, (code, status) in expected.items():
+            err = cls("some message")
+            assert err.code == code
+            assert err.http_status == status
+            assert err.message == "some message"
+            assert err.period_resets_at is None
+
+    def test_quota_exhausted_carries_period_resets_at(self):
+        import datetime
+        from src.api.services.access_service import QuotaExhaustedError
+        reset = datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
+        err = QuotaExhaustedError("exhausted", period_resets_at=reset)
+        assert err.period_resets_at == reset
