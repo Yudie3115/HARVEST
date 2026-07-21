@@ -10,13 +10,24 @@ import hashlib
 import hmac
 import re
 import secrets
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from src.config.settings import settings
+from src.storage.models import (
+    AccessCode,
+    AccessCodeStatusEnum,
+    AccessGrant,
+    AccessGrantStatusEnum,
+    ChannelEnum,
+    GlobalUsageCounter,
+)
 
 DOMAIN_ACCESS_CODE = "access_code"
 DOMAIN_WHATSAPP_GRANT = "whatsapp_grant_identifier"
@@ -121,3 +132,113 @@ def hash_token(token: str) -> str:
 def generate_web_token() -> str:
     """Generate a new opaque, high-entropy (256-bit) web access token."""
     return secrets.token_urlsafe(32)
+
+
+# ---------------------------------------------------------------------------
+# Grant resolution and atomic quota reservation
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ResolvedGrant:
+    grant: AccessGrant
+    access_code: AccessCode
+
+
+def month_start(dt: datetime) -> datetime:
+    """First instant of dt's UTC calendar month. Public — also used by routes to compute
+    period_resets_at for status/redemption responses."""
+    return dt.astimezone(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+def next_month_start(period_start: datetime) -> datetime:
+    """First instant of the UTC calendar month after *period_start*'s month."""
+    if period_start.month == 12:
+        return period_start.replace(year=period_start.year + 1, month=1)
+    return period_start.replace(month=period_start.month + 1)
+
+
+def resolve_web_grant(db: Session, token: str | None) -> ResolvedGrant:
+    """Resolve the active web AccessGrant for *token*. Does not gate on code status."""
+    if not token:
+        raise AccessRequiredError("An access token is required.")
+
+    token_hash = hash_token(token)
+    grant = (
+        db.query(AccessGrant)
+        .filter(
+            AccessGrant.channel == ChannelEnum.web,
+            AccessGrant.identifier_hash == token_hash,
+            AccessGrant.status == AccessGrantStatusEnum.active,
+        )
+        .first()
+    )
+    if grant is None:
+        raise AccessInvalidError("This access token is unknown or has been replaced.")
+
+    access_code = db.get(AccessCode, grant.access_code_id)
+    return ResolvedGrant(grant=grant, access_code=access_code)
+
+
+def require_active_code(access_code: AccessCode) -> None:
+    """Raise AccessRevokedError if *access_code* has been revoked."""
+    if access_code.status == AccessCodeStatusEnum.revoked:
+        raise AccessRevokedError(
+            "This group's access has been revoked. Contact your administrator for a replacement code."
+        )
+
+
+def reserve_quota(db: Session, access_code_id: UUID) -> None:
+    """
+    Atomically reserve one message against both the code's and the global monthly
+    quota, in one transaction, locking global-then-code to prevent deadlocks.
+    """
+    now = datetime.now(timezone.utc)
+    current_period = month_start(now)
+
+    global_row = (
+        db.query(GlobalUsageCounter)
+        .filter(GlobalUsageCounter.id == 1)
+        .with_for_update()
+        .one()
+    )
+    code_row = (
+        db.query(AccessCode)
+        .filter(AccessCode.id == access_code_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if code_row is None:
+        db.rollback()
+        raise AccessInvalidError("This access code no longer exists.")
+
+    if global_row.period_start < current_period:
+        global_row.usage_count = 0
+        global_row.period_start = current_period
+    if code_row.period_start < current_period:
+        code_row.usage_count = 0
+        code_row.period_start = current_period
+
+    if code_row.status == AccessCodeStatusEnum.revoked:
+        db.rollback()
+        raise AccessRevokedError(
+            "This group's access has been revoked. Contact your administrator for a replacement code."
+        )
+
+    if code_row.usage_count >= code_row.monthly_limit:
+        db.rollback()
+        raise QuotaExhaustedError(
+            "This group's messages have been used for this month.",
+            period_resets_at=next_month_start(current_period),
+        )
+
+    if global_row.usage_count >= settings.global_monthly_message_limit:
+        db.rollback()
+        raise GlobalLimitReachedError(
+            "The system-wide message limit has been reached. Please try again later."
+        )
+
+    code_row.usage_count += 1
+    global_row.usage_count += 1
+    db.commit()

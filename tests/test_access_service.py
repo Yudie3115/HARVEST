@@ -134,3 +134,252 @@ class TestAccessErrors:
         reset = datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
         err = QuotaExhaustedError("exhausted", period_resets_at=reset)
         assert err.period_resets_at == reset
+
+
+# ---------------------------------------------------------------------------
+# Integration tests against the real local Postgres database
+# ---------------------------------------------------------------------------
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+
+from src.config.settings import settings
+
+_engine = create_engine(str(settings.database_url))
+_Session = sessionmaker(bind=_engine)
+
+
+def _make_db_session():
+    return _Session()
+
+
+def _insert_access_code(db, monthly_limit=5, status="active", period_start=None, code_hash=None):
+    from src.storage.models import AccessCode
+    code = AccessCode(
+        id=uuid.uuid4(),
+        code_hash=code_hash or uuid.uuid4().hex,
+        label="Test Group",
+        monthly_limit=monthly_limit,
+        status=status,
+        usage_count=0,
+        period_start=period_start or datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ),
+        created_by="tester",
+    )
+    db.add(code)
+    db.commit()
+    db.refresh(code)
+    return code
+
+
+def _reset_global_counter(db, usage_count=0, period_start=None):
+    from src.storage.models import GlobalUsageCounter
+    row = db.get(GlobalUsageCounter, 1)
+    row.usage_count = usage_count
+    row.period_start = period_start or datetime.now(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    db.commit()
+
+
+class TestResolveWebGrant:
+    def test_missing_token_raises_access_required(self):
+        from src.api.services.access_service import resolve_web_grant, AccessRequiredError
+        db = _make_db_session()
+        try:
+            with pytest.raises(AccessRequiredError):
+                resolve_web_grant(db, None)
+        finally:
+            db.close()
+
+    def test_unknown_token_raises_access_invalid(self):
+        from src.api.services.access_service import resolve_web_grant, AccessInvalidError
+        db = _make_db_session()
+        try:
+            with pytest.raises(AccessInvalidError):
+                resolve_web_grant(db, "nonexistent-token")
+        finally:
+            db.close()
+
+    def test_active_web_grant_resolves(self):
+        from src.api.services.access_service import resolve_web_grant, hash_token
+        from src.storage.models import AccessGrant, ChannelEnum
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db)
+            token = "web-token-abc"
+            grant = AccessGrant(
+                id=uuid.uuid4(),
+                access_code_id=code.id,
+                channel=ChannelEnum.web,
+                identifier_hash=hash_token(token),
+                status="active",
+            )
+            db.add(grant)
+            db.commit()
+
+            resolved = resolve_web_grant(db, token)
+            assert resolved.grant.id == grant.id
+            assert resolved.access_code.id == code.id
+        finally:
+            db.close()
+
+    def test_revoked_code_still_resolves_grant(self):
+        """resolve_web_grant does not gate on code status — callers do."""
+        from src.api.services.access_service import resolve_web_grant, hash_token
+        from src.storage.models import AccessGrant, ChannelEnum
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db, status="revoked")
+            token = "web-token-revoked"
+            db.add(AccessGrant(
+                id=uuid.uuid4(), access_code_id=code.id, channel=ChannelEnum.web,
+                identifier_hash=hash_token(token), status="active",
+            ))
+            db.commit()
+
+            resolved = resolve_web_grant(db, token)
+            assert resolved.access_code.status == "revoked"
+        finally:
+            db.close()
+
+
+class TestRequireActiveCode:
+    def test_active_code_passes(self):
+        from src.api.services.access_service import require_active_code
+        from src.storage.models import AccessCode
+        require_active_code(AccessCode(status="active"))  # no exception
+
+    def test_revoked_code_raises(self):
+        from src.api.services.access_service import require_active_code, AccessRevokedError
+        from src.storage.models import AccessCode
+        with pytest.raises(AccessRevokedError):
+            require_active_code(AccessCode(status="revoked"))
+
+
+class TestReserveQuota:
+    def test_successful_reservation_increments_both_counters(self):
+        from src.api.services.access_service import reserve_quota
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db, monthly_limit=5)
+            _reset_global_counter(db, usage_count=0)
+
+            reserve_quota(db, code.id)
+
+            db.refresh(code)
+            from src.storage.models import GlobalUsageCounter
+            global_row = db.get(GlobalUsageCounter, 1)
+            assert code.usage_count == 1
+            assert global_row.usage_count == 1
+        finally:
+            db.close()
+
+    def test_exhausted_code_quota_raises_quota_exhausted(self):
+        from src.api.services.access_service import reserve_quota, QuotaExhaustedError
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db, monthly_limit=1)
+            _reset_global_counter(db, usage_count=0)
+            reserve_quota(db, code.id)  # first message succeeds
+
+            with pytest.raises(QuotaExhaustedError) as exc_info:
+                reserve_quota(db, code.id)  # second exceeds monthly_limit=1
+            assert exc_info.value.period_resets_at is not None
+        finally:
+            db.close()
+
+    def test_revoked_code_raises_access_revoked(self):
+        from src.api.services.access_service import reserve_quota, AccessRevokedError
+        db = _make_db_session()
+        try:
+            code = _insert_access_code(db, monthly_limit=5, status="revoked")
+            _reset_global_counter(db, usage_count=0)
+            with pytest.raises(AccessRevokedError):
+                reserve_quota(db, code.id)
+        finally:
+            db.close()
+
+    def test_exhausted_global_quota_raises_global_limit_reached(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "global_monthly_message_limit", 1)
+        from src.api.services.access_service import reserve_quota, GlobalLimitReachedError
+        db = _make_db_session()
+        try:
+            code_a = _insert_access_code(db, monthly_limit=5)
+            code_b = _insert_access_code(db, monthly_limit=5)
+            _reset_global_counter(db, usage_count=0)
+            reserve_quota(db, code_a.id)  # brings global usage to 1 == limit
+
+            with pytest.raises(GlobalLimitReachedError):
+                reserve_quota(db, code_b.id)
+        finally:
+            db.close()
+
+    def test_stale_period_start_lazily_resets_before_reserving(self):
+        from src.api.services.access_service import reserve_quota
+        db = _make_db_session()
+        try:
+            last_month = datetime.now(timezone.utc).replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=1)
+            last_month_start = last_month.replace(day=1)
+            code = _insert_access_code(db, monthly_limit=1, period_start=last_month_start)
+            db.execute(
+                text("UPDATE access_codes SET usage_count = 1 WHERE id = :id"),
+                {"id": code.id},
+            )
+            _reset_global_counter(db, usage_count=0, period_start=last_month_start)
+            db.commit()
+
+            reserve_quota(db, code.id)  # should not raise — stale period resets first
+
+            db.refresh(code)
+            assert code.usage_count == 1
+        finally:
+            db.close()
+
+    def test_concurrent_reservations_never_exceed_the_code_limit(self):
+        """Two threads race to reserve against a monthly_limit=1 code; exactly one wins."""
+        import threading
+        from src.api.services.access_service import reserve_quota, QuotaExhaustedError
+
+        setup_db = _make_db_session()
+        try:
+            code = _insert_access_code(setup_db, monthly_limit=1)
+            _reset_global_counter(setup_db, usage_count=0)
+            code_id = code.id
+        finally:
+            setup_db.close()
+
+        results = []
+
+        def _attempt():
+            db = _make_db_session()
+            try:
+                try:
+                    reserve_quota(db, code_id)
+                    results.append("ok")
+                except QuotaExhaustedError:
+                    results.append("exhausted")
+            finally:
+                db.close()
+
+        threads = [threading.Thread(target=_attempt) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sorted(results) == ["exhausted", "ok"]
+
+        verify_db = _make_db_session()
+        try:
+            from src.storage.models import AccessCode
+            final = verify_db.get(AccessCode, code_id)
+            assert final.usage_count == 1
+        finally:
+            verify_db.close()
