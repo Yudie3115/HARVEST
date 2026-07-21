@@ -1,6 +1,8 @@
 """
 Chat endpoint — POST /chat
 """
+from uuid import UUID
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -14,18 +16,45 @@ from src.api.dependencies import (
     get_llm_client,
     get_translation_client,
     get_vector_db_client,
+    get_web_grant,
 )
 from src.api.models.requests import ChatRequest
 from src.api.models.responses import ChatResponse
+from src.api.services import access_service
+from src.api.services.access_service import ResolvedGrant, SessionForbiddenError
 from src.api.services.chat_service import process_chat, process_chat_stream
 from src.config.settings import settings
 from src.llm.client import LLMClient
 from src.llm.embeddings import EmbeddingClient
+from src.storage.models import ChatSession
 from src.storage.vector_db import VectorDBClient
 from src.translation.client import TranslationClient
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(tags=["chat"])
+
+
+def _authorize_and_reserve(db: Session, session_id: str, resolved: ResolvedGrant) -> None:
+    """Enforce active-code + session ownership, then reserve one message of quota.
+
+    Must run to completion before any RAG processing starts, and — for the
+    streaming route — before the StreamingResponse is constructed, so failures
+    surface as normal HTTP errors rather than an in-stream SSE error.
+    """
+    access_service.require_active_code(resolved.access_code)
+
+    try:
+        session_uuid = UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid session_id format.")
+
+    chat_session = db.get(ChatSession, session_uuid)
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if chat_session.access_grant_id != resolved.grant.id:
+        raise SessionForbiddenError("This session belongs to a different access grant.")
+
+    access_service.reserve_quota(db, resolved.access_code.id)
 
 
 def _provider_label(provider: str) -> str:
@@ -121,8 +150,11 @@ async def chat(
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     vector_db_client: VectorDBClient = Depends(get_vector_db_client),
     translation_client: TranslationClient = Depends(get_translation_client),
+    resolved: ResolvedGrant = Depends(get_web_grant),
 ) -> ChatResponse:
     """Process a user message and return an AI-generated answer with sources."""
+    _authorize_and_reserve(db, body.session_id, resolved)
+
     active_llm = _select_llm_client(request, body.model_preference, llm_client)
     try:
         return process_chat(
@@ -152,8 +184,11 @@ async def chat_stream(
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
     vector_db_client: VectorDBClient = Depends(get_vector_db_client),
     translation_client: TranslationClient = Depends(get_translation_client),
+    resolved: ResolvedGrant = Depends(get_web_grant),
 ):
     """Stream a chat response as Server-Sent Events."""
+    _authorize_and_reserve(db, body.session_id, resolved)  # raises before any SSE begins
+
     active_llm = _select_llm_client(request, body.model_preference, llm_client)
 
     def _generate():
