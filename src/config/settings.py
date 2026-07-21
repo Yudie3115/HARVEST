@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     admin_username: str = Field(default="admin")
     admin_password: str = Field(default="changeme")
     admin_jwt_secret: str = Field(default="change-this-secret-in-production")
+    access_hash_secret: str = Field(
+        default="change-this-access-hash-secret-in-production"
+    )
+    global_monthly_message_limit: int = Field(default=100000)
 
     # Translation (Sunbird AI)
     sunbird_api_key: str = Field(default="")
