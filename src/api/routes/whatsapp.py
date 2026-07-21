@@ -193,7 +193,13 @@ async def whatsapp_webhook(
         return {"status": "ignored"}
 
     message_text: str = message_obj["text"]["body"]
-    logger.info(f"WhatsApp message from {sender_phone}: {message_text[:80]!r}")
+    # Compute this up front (pure, no DB access) so the log line below can avoid
+    # writing a plaintext access code to the application log.
+    code_shaped = access_service.is_code_format(message_text)
+    if code_shaped:
+        logger.info(f"WhatsApp message from {sender_phone}: [redacted access code]")
+    else:
+        logger.info(f"WhatsApp message from {sender_phone}: {message_text[:80]!r}")
 
     # ------------------------------------------------------------------
     # 6. Resolve any existing grant for this phone
@@ -201,11 +207,18 @@ async def whatsapp_webhook(
     resolved = access_service.resolve_whatsapp_grant(db, sender_phone)
 
     # ------------------------------------------------------------------
-    # 7. Code-shaped messages are always treated as a redemption attempt —
-    #    this covers first-time redemption AND rebinding a replacement code
-    #    over an existing (possibly revoked) grant.
+    # 7. Code-shaped messages are treated as a redemption attempt — this
+    #    covers first-time redemption AND rebinding a replacement code over
+    #    an existing (possibly revoked) grant. Exception: if the phone
+    #    already has a resolved grant and the "code" doesn't match any real
+    #    code (AccessInvalidError), it's most likely an ordinary short
+    #    question that happened to normalize into the 3-word code shape
+    #    (e.g. "dry my maize") — don't swallow it as a failed redemption
+    #    attempt, fall through to the normal authorized-chat path instead.
+    #    A real-but-revoked code (AccessRevokedError) is a different
+    #    situation and keeps the existing invalid_code handling below.
     # ------------------------------------------------------------------
-    if access_service.is_code_format(message_text):
+    if code_shaped:
         try:
             access_service.check_redemption_throttle(db, sender_phone)
         except access_service.RedemptionRateLimitedError:
@@ -220,6 +233,19 @@ async def whatsapp_webhook(
 
         try:
             result = access_service.redeem_whatsapp_code(db, sender_phone, message_text)
+        except access_service.AccessInvalidError:
+            if resolved is None:
+                access_service.record_failed_redemption_attempt(db, sender_phone)
+                try:
+                    whatsapp_service.send_text(
+                        sender_phone,
+                        "That code was not recognized. Please check it and try again.",
+                    )
+                except Exception:
+                    pass
+                return {"status": "invalid_code"}
+            # Already-authorized phone — treat this as an ordinary chat question
+            # rather than a failed redemption attempt. Falls through to step 9.
         except access_service.AccessError:
             access_service.record_failed_redemption_attempt(db, sender_phone)
             try:
@@ -230,17 +256,17 @@ async def whatsapp_webhook(
             except Exception:
                 pass
             return {"status": "invalid_code"}
-
-        access_service.clear_redemption_throttle(db, sender_phone)
-        try:
-            whatsapp_service.send_text(
-                sender_phone,
-                f"You're connected to {result.access_code.label}. "
-                "Send your post-harvest question any time.",
-            )
-        except Exception:
-            pass
-        return {"status": "redeemed"}
+        else:
+            access_service.clear_redemption_throttle(db, sender_phone)
+            try:
+                whatsapp_service.send_text(
+                    sender_phone,
+                    f"You're connected to {result.access_code.label}. "
+                    "Send your post-harvest question any time.",
+                )
+            except Exception:
+                pass
+            return {"status": "redeemed"}
 
     # ------------------------------------------------------------------
     # 8. No grant and a non-code message — prompt for a code, don't chat
