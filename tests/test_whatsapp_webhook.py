@@ -159,6 +159,18 @@ def _sign(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
+def _patch_active_whatsapp_grant(monkeypatch):
+    """Patch access_service so the webhook treats every phone as already granted."""
+    import src.api.routes.whatsapp as route_mod
+    resolved = MagicMock()
+    resolved.grant.id = "grant-1"
+    resolved.access_code.id = "code-1"
+    resolved.access_code.status = "active"
+    monkeypatch.setattr(route_mod.access_service, "resolve_whatsapp_grant", lambda db, phone: resolved)
+    monkeypatch.setattr(route_mod.access_service, "reserve_quota", lambda db, code_id: None)
+    return resolved
+
+
 class TestWebhookVerify:
     def test_valid_token_returns_challenge(self):
         client, _ = _make_client()
@@ -209,7 +221,8 @@ class TestWebhookPost:
             )
         assert resp.status_code == 403
 
-    def test_no_app_secret_configured_skips_verification(self):
+    def test_no_app_secret_configured_skips_verification(self, monkeypatch):
+        _patch_active_whatsapp_grant(monkeypatch)
         client, _ = _make_client()
         payload = _whatsapp_payload()
         with patch("src.api.routes.whatsapp.settings") as s:
@@ -244,7 +257,8 @@ class TestWebhookPost:
         assert resp.status_code == 200
         assert resp.json()["status"] == "rate_limited"
 
-    def test_non_text_message_sends_polite_reply(self):
+    def test_non_text_message_sends_polite_reply(self, monkeypatch):
+        _patch_active_whatsapp_grant(monkeypatch)
         client, mock_svc = _make_client()
         payload = _whatsapp_payload(msg_type="image")
         with patch("src.api.routes.whatsapp.settings") as s:
@@ -259,7 +273,8 @@ class TestWebhookPost:
         reply_text = mock_svc.send_text.call_args[0][1]
         assert "text" in reply_text.lower() or "type" in reply_text.lower()
 
-    def test_text_message_runs_pipeline_and_replies(self):
+    def test_text_message_runs_pipeline_and_replies(self, monkeypatch):
+        _patch_active_whatsapp_grant(monkeypatch)
         client, mock_svc = _make_client()
         payload = _whatsapp_payload(text="What is maize drying?")
         with patch("src.api.routes.whatsapp.settings") as s:
@@ -274,7 +289,8 @@ class TestWebhookPost:
         assert resp.json()["status"] == "ok"
         mock_svc.send_text.assert_called_once_with("+256700000000", "Dry at 14% moisture.")
 
-    def test_pipeline_timeout_sends_error_and_returns_timeout(self):
+    def test_pipeline_timeout_sends_error_and_returns_timeout(self, monkeypatch):
+        _patch_active_whatsapp_grant(monkeypatch)
         client, mock_svc = _make_client()
         payload = _whatsapp_payload(text="slow question")
         with patch("src.api.routes.whatsapp.settings") as s:
@@ -286,4 +302,138 @@ class TestWebhookPost:
                         resp = self._post(client, payload)
         assert resp.status_code == 200
         assert resp.json()["status"] == "timeout"
+        mock_svc.send_text.assert_called_once()
+
+
+class TestWebhookAccessGating:
+    def _post(self, client, payload: dict, secret: str = "", extra_headers: dict = None):
+        body = _json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if secret:
+            headers["X-Hub-Signature-256"] = _sign(body, secret)
+        if extra_headers:
+            headers.update(extra_headers)
+        return client.post("/webhook/whatsapp", content=body, headers=headers)
+
+    def test_non_code_message_with_no_grant_sends_welcome_prompt(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="How do I dry maize?")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch(
+                        "src.api.routes.whatsapp.access_service.resolve_whatsapp_grant",
+                        return_value=None,
+                    ):
+                        resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "awaiting_code"
+        mock_svc.send_text.assert_called_once()
+        reply = mock_svc.send_text.call_args[0][1]
+        assert "code" in reply.lower()
+
+    def test_code_shaped_message_attempts_redemption(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="mango-river-granary")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch(
+                        "src.api.routes.whatsapp.access_service.resolve_whatsapp_grant",
+                        return_value=None,
+                    ):
+                        with patch(
+                            "src.api.routes.whatsapp.access_service.check_redemption_throttle",
+                        ):
+                            with patch(
+                                "src.api.routes.whatsapp.access_service.redeem_whatsapp_code",
+                            ) as mock_redeem:
+                                fake_result = MagicMock()
+                                fake_result.access_code.label = "Group A"
+                                mock_redeem.return_value = fake_result
+                                resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "redeemed"
+        mock_redeem.assert_called_once()
+        mock_svc.send_text.assert_called_once()
+
+    def test_invalid_code_shaped_message_records_failed_attempt(self):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="bad-bad-bad")
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch(
+                        "src.api.routes.whatsapp.access_service.resolve_whatsapp_grant",
+                        return_value=None,
+                    ):
+                        with patch(
+                            "src.api.routes.whatsapp.access_service.check_redemption_throttle",
+                        ):
+                            with patch(
+                                "src.api.routes.whatsapp.access_service.record_failed_redemption_attempt",
+                            ) as mock_record:
+                                from src.api.services.access_service import AccessInvalidError
+                                with patch(
+                                    "src.api.routes.whatsapp.access_service.redeem_whatsapp_code",
+                                    side_effect=AccessInvalidError("nope"),
+                                ):
+                                    resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "invalid_code"
+        mock_record.assert_called_once()
+
+    def test_revoked_existing_grant_sends_blocked_message_and_skips_chat(self, monkeypatch):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="How long should I dry maize?")
+        resolved = MagicMock()
+        resolved.access_code.status = "revoked"
+        monkeypatch.setattr(
+            "src.api.routes.whatsapp.access_service.resolve_whatsapp_grant",
+            lambda db, phone: resolved,
+        )
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch("src.api.routes.whatsapp.process_chat") as mock_chat:
+                        resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "access_revoked"
+        mock_chat.assert_not_called()
+        mock_svc.send_text.assert_called_once()
+
+    def test_quota_exhausted_sends_mapped_message_and_skips_chat(self, monkeypatch):
+        client, mock_svc = _make_client()
+        payload = _whatsapp_payload(text="How long should I dry maize?")
+        resolved = MagicMock()
+        resolved.access_code.status = "active"
+        resolved.access_code.id = "code-1"
+        monkeypatch.setattr(
+            "src.api.routes.whatsapp.access_service.resolve_whatsapp_grant",
+            lambda db, phone: resolved,
+        )
+        from src.api.services.access_service import QuotaExhaustedError
+
+        def _raise(db, code_id):
+            raise QuotaExhaustedError("exhausted")
+        monkeypatch.setattr("src.api.routes.whatsapp.access_service.reserve_quota", _raise)
+
+        with patch("src.api.routes.whatsapp.settings") as s:
+            s.whatsapp_app_secret = ""
+            s.api_rate_limit_whatsapp = 30
+            with patch("src.api.routes.whatsapp._is_duplicate", return_value=False):
+                with patch("src.api.routes.whatsapp._is_rate_limited", return_value=False):
+                    with patch("src.api.routes.whatsapp.process_chat") as mock_chat:
+                        resp = self._post(client, payload)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "quota_exhausted"
+        mock_chat.assert_not_called()
         mock_svc.send_text.assert_called_once()

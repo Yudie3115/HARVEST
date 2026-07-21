@@ -20,6 +20,7 @@ from src.api.dependencies import (
     get_whatsapp_service,
 )
 from src.api.models.requests import ChatRequest
+from src.api.services import access_service
 from src.api.services.chat_service import process_chat
 from src.llm.client import LLMContextTooLargeError
 from src.api.services.whatsapp_service import WhatsAppService
@@ -195,13 +196,109 @@ async def whatsapp_webhook(
     logger.info(f"WhatsApp message from {sender_phone}: {message_text[:80]!r}")
 
     # ------------------------------------------------------------------
-    # 6. Look up or create a ChatSession for this phone number
+    # 6. Resolve any existing grant for this phone
+    # ------------------------------------------------------------------
+    resolved = access_service.resolve_whatsapp_grant(db, sender_phone)
+
+    # ------------------------------------------------------------------
+    # 7. Code-shaped messages are always treated as a redemption attempt —
+    #    this covers first-time redemption AND rebinding a replacement code
+    #    over an existing (possibly revoked) grant.
+    # ------------------------------------------------------------------
+    if access_service.is_code_format(message_text):
+        try:
+            access_service.check_redemption_throttle(db, sender_phone)
+        except access_service.RedemptionRateLimitedError:
+            try:
+                whatsapp_service.send_text(
+                    sender_phone,
+                    "Too many attempts. Please wait a while before trying another code.",
+                )
+            except Exception:
+                pass
+            return {"status": "redemption_rate_limited"}
+
+        try:
+            result = access_service.redeem_whatsapp_code(db, sender_phone, message_text)
+        except access_service.AccessError:
+            access_service.record_failed_redemption_attempt(db, sender_phone)
+            try:
+                whatsapp_service.send_text(
+                    sender_phone,
+                    "That code was not recognized. Please check it and try again.",
+                )
+            except Exception:
+                pass
+            return {"status": "invalid_code"}
+
+        access_service.clear_redemption_throttle(db, sender_phone)
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                f"You're connected to {result.access_code.label}. "
+                "Send your post-harvest question any time.",
+            )
+        except Exception:
+            pass
+        return {"status": "redeemed"}
+
+    # ------------------------------------------------------------------
+    # 8. No grant and a non-code message — prompt for a code, don't chat
+    # ------------------------------------------------------------------
+    if resolved is None:
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "Welcome! To ask a question, first send your 3-word access code "
+                "(e.g. mango-river-granary).",
+            )
+        except Exception:
+            pass
+        return {"status": "awaiting_code"}
+
+    # ------------------------------------------------------------------
+    # 9. Gate on code status and reserve quota before entering the RAG pipeline
+    # ------------------------------------------------------------------
+    try:
+        access_service.require_active_code(resolved.access_code)
+        access_service.reserve_quota(db, resolved.access_code.id)
+    except access_service.AccessRevokedError:
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "This group's access has been revoked. Contact your administrator for a replacement code.",
+            )
+        except Exception:
+            pass
+        return {"status": "access_revoked"}
+    except access_service.QuotaExhaustedError:
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "This group's messages have been used for this month. Try again next month.",
+            )
+        except Exception:
+            pass
+        return {"status": "quota_exhausted"}
+    except access_service.GlobalLimitReachedError:
+        try:
+            whatsapp_service.send_text(
+                sender_phone,
+                "The service is at capacity right now. Please try again later.",
+            )
+        except Exception:
+            pass
+        return {"status": "global_limit_reached"}
+
+    # ------------------------------------------------------------------
+    # 10. Look up or create a ChatSession for this phone, owned by the grant
     # ------------------------------------------------------------------
     chat_session: ChatSession | None = (
         db.query(ChatSession)
         .filter(
             ChatSession.channel == ChannelEnum.whatsapp,
             ChatSession.identifier == sender_phone,
+            ChatSession.access_grant_id == resolved.grant.id,
         )
         .first()
     )
@@ -210,6 +307,7 @@ async def whatsapp_webhook(
         chat_session = ChatSession(
             channel=ChannelEnum.whatsapp,
             identifier=sender_phone,
+            access_grant_id=resolved.grant.id,
         )
         db.add(chat_session)
         db.commit()
@@ -217,7 +315,7 @@ async def whatsapp_webhook(
         logger.info(f"Created WhatsApp session {chat_session.id} for {sender_phone}")
 
     # ------------------------------------------------------------------
-    # 7. Run RAG pipeline with a 15-second timeout
+    # 11. Run RAG pipeline with a 15-second timeout
     # ------------------------------------------------------------------
     try:
         chat_response = await asyncio.wait_for(
@@ -268,7 +366,7 @@ async def whatsapp_webhook(
         return {"status": "error"}
 
     # ------------------------------------------------------------------
-    # 8. Send reply
+    # 12. Send reply
     # ------------------------------------------------------------------
     try:
         whatsapp_service.send_text(sender_phone, chat_response.answer)
