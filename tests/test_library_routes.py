@@ -38,6 +38,48 @@ def _reset_library_cache():
     lib._reset_facets_cache()
 
 
+def _delete_test_rows():
+    """Delete all rows this test file could have inserted, identified by the hardcoded
+    site_name='test' used throughout _make_document().
+
+    Uses real, committed DELETE statements against the persistent local dev Postgres —
+    not a transaction rollback. Every test in this file gets its own `db` session from
+    _make_client() (shared with app.dependency_overrides for the duration of that one
+    test), so there is no single outer transaction a rollback-based fixture could wrap;
+    each test's session commits independently via _make_document(). Cleanup therefore
+    has to be an explicit DELETE + commit against the real DB, run in its own session.
+
+    Order matters: documents must be deleted before crawl_runs. document_classifications
+    and content_chunks cascade automatically (ondelete="CASCADE" on their document_id FK
+    — see DocumentClassification/ContentChunk in src/storage/models.py), but
+    Document.crawl_run_id -> crawl_runs.id has no ondelete, so deleting crawl_runs first
+    would raise a foreign key violation against any remaining test documents.
+    """
+    db = _make_db_session()
+    try:
+        db.execute(text("DELETE FROM documents WHERE site_name = 'test'"))
+        db.execute(text("DELETE FROM crawl_runs WHERE site_name = 'test'"))
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def _clean_test_documents():
+    """Guarantee a clean starting DB state for every test in this file, and leave a clean
+    state behind afterward. Runs before AND after each individual test function (function
+    scope, not module scope) because tests run in an unpredictable order and every test —
+    not just the first — needs to start from zero rows. Without this, e.g.
+    test_counts_are_correct_across_multiple_documents's `shared["count"] == 3` assertion
+    would accumulate extra rows on a second suite run, and
+    test_cache_serves_stale_result_until_reset's `"cache-test-topic" not in before`
+    assertion would fail if a prior run's row were still present.
+    """
+    _delete_test_rows()
+    yield
+    _delete_test_rows()
+
+
 def _make_document(
     db,
     *,
