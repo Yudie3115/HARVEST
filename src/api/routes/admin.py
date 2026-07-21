@@ -203,7 +203,7 @@ def update_document_publication(
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    if body.public_source_url is not None:
+    if body.public_source_url is not None and body.public_source_url.strip():
         doc.public_source_url = body.public_source_url
 
     if body.publicly_visible:

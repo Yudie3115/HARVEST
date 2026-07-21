@@ -111,3 +111,15 @@ class TestPublicationEndpoint:
         assert resp.status_code == 200
         assert doc.public_source_url == "https://realsite.example/x.pdf"
         assert doc.publicly_visible is False
+
+    def test_empty_public_source_url_does_not_clear_existing_value(self):
+        client, db = _make_client()
+        doc = _fake_document(publicly_visible=True, public_source_url="https://realsite.example/existing.pdf")
+        db.get.return_value = doc
+        resp = client.patch(
+            f"/admin/documents/{doc.id}/publication",
+            json={"publicly_visible": False, "public_source_url": ""},
+        )
+        assert resp.status_code == 200
+        assert doc.public_source_url == "https://realsite.example/existing.pdf"
+        assert doc.publicly_visible is False
