@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from src.config.settings import settings
-from src.api.routes import access, admin, admin_access, chat, health, session, whatsapp
+from src.api.routes import access, admin, admin_access, chat, health, library, session, whatsapp
 from src.api.services.access_service import AccessError, access_error_handler
 
 
@@ -96,3 +96,4 @@ app.include_router(whatsapp.router, prefix="/webhook")
 app.include_router(admin.router)
 app.include_router(admin_access.router)
 app.include_router(access.router)
+app.include_router(library.router)
