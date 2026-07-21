@@ -15,3 +15,17 @@ class ChatRequest(BaseModel):
     message: str
     language_override: str | None = None  # e.g. "lug", "ach"
     model_preference: Literal["openai", "groq", "ollama"] | None = None
+
+
+class CreateAccessCodeRequest(BaseModel):
+    label: str
+    monthly_limit: int
+    organization_name: str | None = None
+    contact_message: str | None = None
+
+
+class UpdateAccessCodeRequest(BaseModel):
+    label: str | None = None
+    monthly_limit: int | None = None
+    organization_name: str | None = None
+    contact_message: str | None = None

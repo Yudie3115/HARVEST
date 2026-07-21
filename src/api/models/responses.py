@@ -35,3 +35,27 @@ class HistoryMessage(BaseModel):
 class SessionHistoryResponse(BaseModel):
     session_id: str
     messages: list[HistoryMessage]
+
+
+class AccessCodeAdminResponse(BaseModel):
+    id: str
+    label: str
+    organization_name: str | None
+    contact_message: str | None
+    monthly_limit: int
+    status: str
+    usage_count: int
+    period_start: str
+    created_at: str
+    created_by: str
+
+
+class AccessCodeCreatedResponse(AccessCodeAdminResponse):
+    code: str  # plaintext, shown once at creation only
+
+
+class AccessCodeListResponse(BaseModel):
+    items: list[AccessCodeAdminResponse]
+    total: int
+    offset: int
+    limit: int
