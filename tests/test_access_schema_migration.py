@@ -45,3 +45,12 @@ def test_publication_catalogue_and_job_tables_exist():
     document_columns = {c["name"] for c in inspector.get_columns("documents")}
     assert {"publicly_visible", "published_at", "published_by"} <= document_columns
     engine.dispose()
+
+
+def test_document_public_source_url_column_exists():
+    engine = create_engine(str(settings.database_url))
+    inspector = inspect(engine)
+    document_columns = {c["name"]: c for c in inspector.get_columns("documents")}
+    assert "public_source_url" in document_columns
+    assert document_columns["public_source_url"]["nullable"] is True
+    engine.dispose()

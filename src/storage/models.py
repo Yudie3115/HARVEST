@@ -90,6 +90,7 @@ class Document(Base):
     publicly_visible = Column(Boolean, nullable=False, default=False, server_default="false")
     published_at = Column(DateTime(timezone=True), nullable=True)
     published_by = Column(String(100), nullable=True)
+    public_source_url = Column(Text, nullable=True)
 
     # Document metadata
     title = Column(Text)
