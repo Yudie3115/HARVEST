@@ -59,3 +59,19 @@ class AccessCodeListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+class RedeemResponse(BaseModel):
+    access_token: str
+    label: str
+    monthly_limit: int
+    usage_count: int
+    period_resets_at: str
+
+
+class AccessStatusResponse(BaseModel):
+    status: str  # "active" | "revoked"
+    label: str
+    monthly_limit: int
+    usage_count: int
+    period_resets_at: str

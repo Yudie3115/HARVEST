@@ -6,8 +6,10 @@ Route handlers receive them via these Depends() callables.
 """
 from typing import Generator
 
-from fastapi import Request
+from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
+
+from src.api.services import access_service
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -37,3 +39,11 @@ def get_translation_client(request: Request):
 
 def get_whatsapp_service(request: Request):
     return request.app.state.whatsapp_service
+
+
+def get_web_grant(
+    x_access_token: str | None = Header(default=None, alias="X-Access-Token"),
+    db: Session = Depends(get_db),
+) -> "access_service.ResolvedGrant":
+    """Resolve the active web AccessGrant for the X-Access-Token header. Raises AccessError."""
+    return access_service.resolve_web_grant(db, x_access_token)

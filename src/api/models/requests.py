@@ -29,3 +29,7 @@ class UpdateAccessCodeRequest(BaseModel):
     monthly_limit: int | None = None
     organization_name: str | None = None
     contact_message: str | None = None
+
+
+class RedeemCodeRequest(BaseModel):
+    code: str
