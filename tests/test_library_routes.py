@@ -146,6 +146,19 @@ def _make_document(
     return doc_id
 
 
+def _add_chunks(db, document_id, texts: list[str]):
+    from src.storage.models import ContentChunk
+    for i, text_ in enumerate(texts):
+        db.execute(
+            text(
+                "INSERT INTO content_chunks (id, document_id, chunk_index, text, created_at) "
+                "VALUES (:id, :document_id, :chunk_index, :text, now())"
+            ),
+            {"id": uuid.uuid4(), "document_id": document_id, "chunk_index": i, "text": text_},
+        )
+    db.commit()
+
+
 class TestLibraryFacets:
     def test_only_publicly_visible_processed_above_threshold_are_counted(self, monkeypatch):
         from src.config import settings as settings_module
@@ -352,3 +365,84 @@ class TestLibraryDocumentsList:
         resp = client.get("/library/documents", params={"q": "no-such-document-marker-xyz"})
         assert resp.status_code == 200
         assert resp.json()["items"] == []
+
+
+class TestLibraryDocumentDetail:
+    def test_visible_document_returns_full_detail(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = _make_document(db, title="Detail Doc", topics=["storage"])
+        _add_chunks(db, doc_id, ["First chunk text.", "Second chunk text.", "Third chunk text."])
+
+        resp = client.get(f"/library/documents/{doc_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(doc_id)
+        assert body["title"] == "Detail Doc"
+        assert body["topics"] == ["storage"]
+        assert len(body["excerpts"]) == 3
+        assert body["excerpts"][0]["text"] == "First chunk text."
+        assert body["excerpts"][0]["chunk_index"] == 0
+        assert "full_text" not in body  # explicitly not assembling full document text
+
+    def test_excerpts_are_bounded_to_three_chunks_and_truncated(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = _make_document(db, title="Long Doc")
+        long_text = "x" * 2000
+        _add_chunks(db, doc_id, [long_text, "chunk 2", "chunk 3", "chunk 4", "chunk 5"])
+
+        resp = client.get(f"/library/documents/{doc_id}")
+        body = resp.json()
+        assert len(body["excerpts"]) == 3
+        assert len(body["excerpts"][0]["text"]) == 800
+
+    def test_nonexistent_document_returns_404(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        resp = client.get(f"/library/documents/{uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    def test_unprocessed_document_returns_the_same_404(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = _make_document(db, status="DISCOVERED")
+        resp_missing = client.get(f"/library/documents/{uuid.uuid4()}")
+        resp_unprocessed = client.get(f"/library/documents/{doc_id}")
+        assert resp_unprocessed.status_code == resp_missing.status_code == 404
+        assert resp_unprocessed.json() == resp_missing.json()
+
+    def test_not_publicly_visible_document_returns_the_same_404(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = _make_document(db, publicly_visible=False)
+        resp = client.get(f"/library/documents/{doc_id}")
+        assert resp.status_code == 404
+
+    def test_unpublished_upload_document_returns_404(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        doc_id = uuid.uuid4()
+        _make_document(db, url=f"upload://{doc_id}/guide.pdf", public_source_url=None)
+        resp = client.get(f"/library/documents/{doc_id}")
+        assert resp.status_code == 404
+
+    def test_invalid_uuid_returns_422_not_500(self, monkeypatch):
+        from src.config import settings as settings_module
+        monkeypatch.setattr(settings_module.settings, "relevance_threshold", 6.0)
+        app, client, db = _make_client()
+
+        resp = client.get("/library/documents/not-a-uuid")
+        assert resp.status_code == 422

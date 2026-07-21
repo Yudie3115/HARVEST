@@ -7,14 +7,15 @@ Document.publicly_visible == true. Uploaded (upload://) sources are additionally
 excluded unless public_source_url is set. Relevance alone never grants visibility.
 """
 import time
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db
 from src.config.settings import settings
-from src.storage.models import Document, DocumentClassification, DocumentStatus
+from src.storage.models import ContentChunk, Document, DocumentClassification, DocumentStatus
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -138,3 +139,47 @@ def list_documents(
         for doc, classification in rows
     ]
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+_EXCERPT_MAX_CHUNKS = 3
+_EXCERPT_MAX_CHARS = 800
+
+
+@router.get("/documents/{document_id}")
+def get_document_detail(document_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Full detail for one publicly visible document: metadata + bounded excerpts, not full text."""
+    row = (
+        _visible_documents_query(db)
+        .filter(Document.id == document_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    doc, classification = row
+
+    chunks = (
+        db.query(ContentChunk)
+        .filter(ContentChunk.document_id == document_id)
+        .order_by(ContentChunk.chunk_index)
+        .limit(_EXCERPT_MAX_CHUNKS)
+        .all()
+    )
+    excerpts = [
+        {"chunk_index": c.chunk_index, "text": c.text[:_EXCERPT_MAX_CHARS]}
+        for c in chunks
+    ]
+
+    return {
+        "id": str(doc.id),
+        "title": doc.title,
+        "summary": classification.summary,
+        "document_category": classification.document_category,
+        "topics": classification.topics or [],
+        "crops": classification.crops or [],
+        "regions": classification.regions or [],
+        "key_practices": classification.key_practices,
+        "actionable": bool(classification.actionable),
+        "has_data": bool(classification.has_data),
+        "source_url": _source_url(doc),
+        "excerpts": excerpts,
+    }
