@@ -15,17 +15,24 @@ export default function ChatWindow({ messages, isLoading, onShowSources }) {
         flex: 1,
         overflowY: 'auto',
         padding: '20px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 14,
         minHeight: 0,
       }}
     >
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} onShowSources={onShowSources} />
-      ))}
-      {isLoading && <TypingIndicator />}
-      <div ref={bottomRef} style={{ height: 4 }} />
+      <div
+        style={{
+          maxWidth: 780,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} onShowSources={onShowSources} />
+        ))}
+        {isLoading && <TypingIndicator />}
+        <div ref={bottomRef} style={{ height: 4 }} />
+      </div>
     </div>
   )
 }
