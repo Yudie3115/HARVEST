@@ -70,6 +70,12 @@ export const adminApi = {
     return request('GET', `/admin/documents?${q}`)
   },
 
+  updateDocumentPublication: (id, body) =>
+    request('PATCH', `/admin/documents/${id}/publication`, body),
+
+  updateDocumentTitle: (id, title) =>
+    request('PATCH', `/admin/documents/${id}/title`, { title }),
+
   getHealth: () => request('GET', '/admin/health'),
 
   getConfig: () => request('GET', '/admin/config'),

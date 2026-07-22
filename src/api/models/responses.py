@@ -83,3 +83,8 @@ class PublicationUpdateResponse(BaseModel):
     published_at: str | None
     published_by: str | None
     public_source_url: str | None
+
+
+class DocumentTitleUpdateResponse(BaseModel):
+    id: str
+    title: str

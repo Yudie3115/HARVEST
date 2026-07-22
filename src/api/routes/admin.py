@@ -5,6 +5,8 @@ Endpoints:
   POST /admin/login                  → exchange credentials for JWT
   GET  /admin/stats                  → doc counts + crawl activity
   GET  /admin/documents              → paginated document list
+  PATCH /admin/documents/{id}/publication → publish/unpublish a document
+  PATCH /admin/documents/{id}/title  → rename a document
   GET  /admin/health                 → service connection status
   GET  /admin/config                 → read-only settings snapshot
   POST /admin/crawl/full             → trigger Prefect full crawl
@@ -26,11 +28,11 @@ from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import cast, func, text
 from sqlalchemy.dialects.postgresql import DATE
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.api.dependencies import get_db, get_vector_db_client
-from src.api.models.requests import PublicationUpdateRequest
-from src.api.models.responses import PublicationUpdateResponse
+from src.api.models.requests import DocumentTitleUpdateRequest, PublicationUpdateRequest
+from src.api.models.responses import DocumentTitleUpdateResponse, PublicationUpdateResponse
 from src.config.settings import settings
 from src.storage.models import Document, DocumentStatus
 
@@ -152,7 +154,7 @@ def list_documents(
     _: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Document)
+    query = db.query(Document).options(joinedload(Document.classification))
     if site:
         query = query.filter(Document.site_name == site)
     if status:
@@ -173,6 +175,7 @@ def list_documents(
         meta = doc.extra_metadata or {}
         llm = meta.get("llm_classification", {}) or {}
         relevance = llm.get("relevance_score")
+        classification = doc.classification
         items.append({
             "id": str(doc.id),
             "title": doc.title or "Untitled",
@@ -182,6 +185,17 @@ def list_documents(
             "status": doc.status.value if doc.status else "unknown",
             "relevance_score": relevance,
             "discovered_at": doc.discovered_at.isoformat() if doc.discovered_at else None,
+            "publicly_visible": doc.publicly_visible,
+            "published_at": doc.published_at.isoformat() if doc.published_at else None,
+            "published_by": doc.published_by,
+            "public_source_url": doc.public_source_url,
+            "summary": classification.summary if classification else None,
+            "document_category": classification.document_category if classification else None,
+            "key_practices": classification.key_practices if classification else None,
+            "topics": (classification.topics or []) if classification else [],
+            "crops": (classification.crops or []) if classification else [],
+            "regions": (classification.regions or []) if classification else [],
+            "classification_relevance_score": classification.relevance_score if classification else None,
         })
 
     if sort == "relevance":
@@ -234,6 +248,28 @@ def update_document_publication(
         published_by=doc.published_by,
         public_source_url=doc.public_source_url,
     )
+
+
+@router.patch("/documents/{document_id}/title", response_model=DocumentTitleUpdateResponse)
+def update_document_title(
+    document_id: UUID,
+    body: DocumentTitleUpdateRequest,
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> DocumentTitleUpdateResponse:
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+
+    doc.title = title
+    db.commit()
+    db.refresh(doc)
+
+    return DocumentTitleUpdateResponse(id=str(doc.id), title=doc.title)
 
 
 # ---------------------------------------------------------------------------
