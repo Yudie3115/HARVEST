@@ -168,10 +168,9 @@ function DocumentDetail({ doc }) {
           <SectionLabel>Excerpts</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {doc.excerpts.map((excerpt) => (
-              <p
+              <div
                 key={excerpt.chunk_index}
                 style={{
-                  margin: 0,
                   padding: '10px 14px',
                   borderLeft: '3px solid #3d6b4f',
                   background: '#0f1a12',
@@ -179,11 +178,12 @@ function DocumentDetail({ doc }) {
                   fontFamily: '"IBM Plex Mono", monospace',
                   fontSize: 12.5,
                   lineHeight: 1.7,
-                  whiteSpace: 'pre-wrap',
                 }}
               >
-                {excerpt.text}
-              </p>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  {excerpt.text}
+                </ReactMarkdown>
+              </div>
             ))}
           </div>
         </div>
