@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install install-local setup setup-local dev-local check-local-services local api frontend start stop restart logs clean test
+.PHONY: help install install-local setup setup-local dev-local check-local-services local api frontend catalogue-worker start stop restart logs clean test
 
 help:
 	@echo "Post-Harvest Knowledge Scraper - Development Commands"
@@ -16,6 +16,7 @@ help:
 	@echo "  make local            Run API and frontend outside Docker"
 	@echo "  make api              Run FastAPI outside Docker"
 	@echo "  make frontend         Run Vite frontend outside Docker"
+	@echo "  make catalogue-worker Run the catalogue background worker"
 	@echo "  make start            Start all Docker services"
 	@echo "  make stop             Stop all Docker services"
 	@echo "  make restart          Restart all Docker services"
@@ -58,18 +59,24 @@ check-local-services:
 local: check-local-services
 	@echo "Starting API on http://localhost:8000"
 	@echo "Starting frontend on http://localhost:5173"
-	@trap 'kill $$api_pid $$frontend_pid 2>/dev/null || true' INT TERM EXIT; \
+	@echo "Starting catalogue worker"
+	@trap 'kill $$api_pid $$frontend_pid $$worker_pid 2>/dev/null || true' INT TERM EXIT; \
 	poetry run uvicorn src.api.main:app --reload --port 8000 & \
 	api_pid=$$!; \
 	(cd frontend && pnpm run dev) & \
 	frontend_pid=$$!; \
-	wait -n $$api_pid $$frontend_pid
+	poetry run python scripts/catalogue_worker.py & \
+	worker_pid=$$!; \
+	wait -n $$api_pid $$frontend_pid $$worker_pid
 
 api:
 	poetry run uvicorn src.api.main:app --reload --port 8000
 
 frontend:
 	cd frontend && pnpm run dev
+
+catalogue-worker:
+	poetry run python scripts/catalogue_worker.py
 
 start:
 	docker-compose up -d

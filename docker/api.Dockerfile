@@ -10,6 +10,7 @@ COPY requirements.api.txt ./
 RUN pip install --no-cache-dir -r requirements.api.txt
 
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 EXPOSE 8000
 
