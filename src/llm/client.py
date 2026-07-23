@@ -457,6 +457,39 @@ Summary:"""
             history=history,
         )
 
+    def evaluate_catalogue_candidate(self, question: str, answer: str) -> Dict:
+        """Return a bounded quality score and a reusable English question."""
+        prompt = f"""Assess whether this post-harvest Q&A is useful as a reusable public catalogue entry.
+
+Question:
+{question[:3000]}
+
+Answer:
+{answer[:7000]}
+
+Return JSON with exactly:
+- worth_cataloguing_score: number from 0 to 1
+- optimised_question: a clear, standalone English question of at most 300 characters
+
+Prefer practical, generally reusable questions. Reject greetings, personal requests, vague follow-ups,
+and answers that depend on missing conversational context."""
+        raw = self._generate(
+            prompt=prompt,
+            system_prompt=(
+                "You curate a trusted post-harvest agriculture Q&A catalogue. "
+                "Return valid JSON only and do not add facts."
+            ),
+            response_format="json",
+            temperature=0.0,
+            max_tokens=300,
+        )
+        result = json.loads(raw)
+        score = max(0.0, min(1.0, float(result["worth_cataloguing_score"])))
+        optimised = str(result["optimised_question"]).strip()[:300]
+        if not optimised:
+            raise ValueError("LLM returned an empty optimised_question")
+        return {"worth_cataloguing_score": score, "optimised_question": optimised}
+
     def stream_answer(
         self,
         question: str,

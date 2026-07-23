@@ -56,6 +56,9 @@ class VectorDBBackend(Protocol):
     def delete_chunk(self, chunk_id: str) -> None:
         ...
 
+    def delete_point(self, point_id: str) -> None:
+        ...
+
     def get_collection_info(self) -> Dict[str, Any]:
         ...
 
@@ -266,6 +269,10 @@ class QdrantVectorDBBackend:
             points_selector=PointIdsList(points=[chunk_id]),
         )
 
+    def delete_point(self, point_id: str) -> None:
+        """Delete a single vector by its stable point ID."""
+        self.delete_chunk(point_id)
+
     def get_collection_info(self) -> Dict[str, Any]:
         """Return collection statistics."""
         try:
@@ -424,6 +431,10 @@ class ChromaVectorDBBackend:
         """Delete a single vector by chunk ID."""
         self.chroma_collection.delete(ids=[chunk_id])
 
+    def delete_point(self, point_id: str) -> None:
+        """Delete a single vector by its stable point ID."""
+        self.delete_chunk(point_id)
+
     def get_collection_info(self) -> Dict[str, Any]:
         """Return collection statistics."""
         try:
@@ -528,6 +539,9 @@ class VectorDBClient:
 
     def delete_chunk(self, chunk_id: str) -> None:
         self._backend.delete_chunk(chunk_id)
+
+    def delete_point(self, point_id: str) -> None:
+        self._backend.delete_point(point_id)
 
     def get_collection_info(self) -> Dict[str, Any]:
         return self._backend.get_collection_info()

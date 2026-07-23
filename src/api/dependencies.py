@@ -33,6 +33,10 @@ def get_vector_db_client(request: Request):
     return request.app.state.vector_db_client
 
 
+def get_catalogue_vector_db_client(request: Request):
+    return request.app.state.catalogue_vector_db_client
+
+
 def get_translation_client(request: Request):
     return request.app.state.translation_client
 

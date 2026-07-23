@@ -132,6 +132,17 @@ class Settings(BaseSettings):
     # Chat retrieval
     chat_score_threshold: float = Field(default=0.3)
 
+    # Q&A catalogue
+    catalogue_collection_name: str = Field(default="postharvest_catalogue")
+    catalogue_mode: Literal["manual", "auto"] = Field(default="manual")
+    catalogue_min_faithfulness: float = Field(default=0.60)
+    catalogue_min_score: float = Field(default=0.70)
+    catalogue_duplicate_threshold: float = Field(default=0.90)
+    catalogue_match_threshold: float = Field(default=0.82)
+    catalogue_match_rate_limit: str = Field(default="30/hour")
+    catalogue_helpful_rate_limit: str = Field(default="30/hour")
+    catalogue_job_max_attempts: int = Field(default=5)
+
     # API
     api_rate_limit_web: int = Field(default=20)       # requests per hour per IP
     api_rate_limit_whatsapp: int = Field(default=30)  # messages per hour per phone
