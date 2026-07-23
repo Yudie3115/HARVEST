@@ -1,15 +1,15 @@
 """
 Core RAG chat service — orchestrates translation, embedding, retrieval, and LLM synthesis.
 """
-from typing import Generator, List, Optional
+from typing import Generator, List
 from uuid import UUID
 
-from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.requests import ChatRequest
 from src.api.models.responses import ChatResponse, SourceRef
+from src.api.services.catalogue_service import enqueue_candidate_job
 from src.config.settings import settings
 from src.llm.client import LLMClient, LLMContextTooLargeError
 from src.llm.embeddings import EmbeddingClient
@@ -48,7 +48,6 @@ def process_chat(
     embedding_client: EmbeddingClient,
     vector_db_client: VectorDBClient,
     translation_client: TranslationClient,
-    background_tasks: Optional[BackgroundTasks] = None,
 ) -> ChatResponse:
     """
     Orchestrate the full RAG pipeline for a single chat turn.
@@ -66,7 +65,7 @@ def process_chat(
     8. Translate the answer back to the detected language if needed.
     9. Build sources from chunk payloads.
     10. Persist both user and assistant messages.
-    11. Schedule faithfulness scoring (off critical path).
+    11. Enqueue a durable catalogue candidate job (scored off critical path by the worker).
     """
     session_uuid = UUID(request.session_id)
 
@@ -264,23 +263,16 @@ def process_chat(
         sources=sources_dicts,
     )
     db.add(assistant_msg)
+    db.flush()
+    enqueue_candidate_job(
+        db,
+        assistant_message_id=assistant_msg.id,
+        source_chunk_ids=[hit["id"] for hit in search_results],
+    )
 
     from sqlalchemy.sql import func as sqlfunc
     chat_session.last_active_at = sqlfunc.now()
     db.commit()
-
-    # ------------------------------------------------------------------
-    # 11. Schedule faithfulness scoring (off critical path)
-    # ------------------------------------------------------------------
-    if background_tasks is not None:
-        if settings.bertscore_enabled and chunks:
-            from src.llm.bert_scoring import score_message_background
-            background_tasks.add_task(
-                score_message_background,
-                message_id=str(assistant_msg.id),
-                candidate=english_answer,
-                references=[c["text"] for c in chunks],
-            )
 
     logger.info(
         f"Chat turn complete for session {request.session_id} "
@@ -303,7 +295,6 @@ def process_chat_stream(
     embedding_client: EmbeddingClient,
     vector_db_client: VectorDBClient,
     translation_client: TranslationClient,
-    background_tasks: Optional[BackgroundTasks] = None,
 ) -> Generator[str, None, None]:
     """
     SSE generator for streaming chat responses.
@@ -463,20 +454,15 @@ def process_chat_stream(
         )
         db.add(user_msg)
         db.add(assistant_msg)
+        db.flush()
+        enqueue_candidate_job(
+            db,
+            assistant_message_id=assistant_msg.id,
+            source_chunk_ids=[hit["id"] for hit in search_results],
+        )
         from sqlalchemy.sql import func as sqlfunc
         chat_session.last_active_at = sqlfunc.now()
         db.commit()
-
-        # BertScore (off critical path)
-        if background_tasks is not None:
-            if settings.bertscore_enabled and chunks:
-                from src.llm.bert_scoring import score_message_background
-                background_tasks.add_task(
-                    score_message_background,
-                    message_id=str(assistant_msg.id),
-                    candidate=full_english_response,
-                    references=[c["text"] for c in chunks],
-                )
 
         logger.info(
             f"Streaming chat turn complete for session {request.session_id} "

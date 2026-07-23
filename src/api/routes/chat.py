@@ -3,7 +3,7 @@ Chat endpoint — POST /chat
 """
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from slowapi import Limiter
@@ -144,7 +144,6 @@ async def chat_models() -> dict:
 async def chat(
     request: Request,  # required by slowapi
     body: ChatRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     llm_client: LLMClient = Depends(get_llm_client),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
@@ -164,7 +163,6 @@ async def chat(
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
-            background_tasks=background_tasks,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -178,7 +176,6 @@ async def chat(
 async def chat_stream(
     request: Request,
     body: ChatRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     llm_client: LLMClient = Depends(get_llm_client),
     embedding_client: EmbeddingClient = Depends(get_embedding_client),
@@ -199,7 +196,6 @@ async def chat_stream(
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
-            background_tasks=background_tasks,
         )
 
     return StreamingResponse(
