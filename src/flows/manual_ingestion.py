@@ -10,11 +10,10 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
-from loguru import logger
-
 from src.config.settings import settings
 from src.flows.processing import (
     _detect_document_type,
+    _log_processing_status,
     download_document,
     extract_content,
     classify_document_content,
@@ -54,7 +53,7 @@ def ingest_manual_document(
         url             The URL or synthetic upload:// URI stored in the DB
         chunks          Number of chunks written (0 if skipped/failed)
         relevance_score Float (present when classification succeeded)
-        reason          "low_relevance" | "no_content" (present when skipped)
+        reason          Machine-readable skip/failure reason (present for non-success outcomes)
     """
     if content is None and url is None:
         raise ValueError("Provide either 'content' + 'filename', or 'url'")
@@ -119,7 +118,22 @@ def ingest_manual_document(
         download_result = download_document(doc_id, url)
         if not download_result:
             # download_document already set status=FAILED and logged the error
-            return {"document_id": doc_id, "url": source_url, "status": "failed", "chunks": 0}
+            _log_processing_status(
+                document_id=doc_id,
+                url=source_url,
+                status="failed",
+                explanation=(
+                    "manual ingestion could not download or store the source file; "
+                    "no content was indexed"
+                ),
+            )
+            return {
+                "document_id": doc_id,
+                "url": source_url,
+                "status": "failed",
+                "chunks": 0,
+                "reason": "download_failed",
+            }
 
         db.update_document_file_info(
             document_id=UUID(doc_id),
@@ -139,7 +153,15 @@ def ingest_manual_document(
             DocumentStatus.SKIPPED,
             error_log="No extractable content",
         )
-        logger.warning(f"Manual ingestion skipped (no content): {source_url}")
+        _log_processing_status(
+            document_id=doc_id,
+            url=source_url,
+            status="skipped",
+            explanation=(
+                "manual ingestion found no usable text (content may be empty, too short, "
+                "unsupported, or image-only); no chunks were indexed"
+            ),
+        )
         return {
             "document_id": doc_id,
             "url": source_url,
@@ -174,9 +196,15 @@ def ingest_manual_document(
             ),
         )
         db.create_classification(UUID(doc_id), classification)
-        logger.info(
-            f"Manual ingestion skipped (relevance {relevance_score:.1f} < "
-            f"{settings.relevance_threshold}): {source_url}"
+        _log_processing_status(
+            document_id=doc_id,
+            url=source_url,
+            status="skipped",
+            explanation=(
+                f"relevance score {relevance_score:.1f} is below the configured threshold "
+                f"{settings.relevance_threshold}; classification was saved but no chunks "
+                "were indexed"
+            ),
         )
         return {
             "document_id": doc_id,
@@ -200,12 +228,21 @@ def ingest_manual_document(
             DocumentStatus.FAILED,
             error_log=str(exc),
         )
-        logger.error(f"Manual ingestion failed during chunk/store for {source_url}: {exc}")
+        _log_processing_status(
+            document_id=doc_id,
+            url=source_url,
+            status="failed",
+            explanation=(
+                f"manual ingestion failed during chunking, embedding, or storage; "
+                f"document was not fully indexed: {exc}"
+            ),
+        )
         return {
             "document_id": doc_id,
             "url": source_url,
             "status": "failed",
             "chunks": 0,
+            "reason": "chunk_or_storage_failed",
         }
 
     summary = {
@@ -215,5 +252,13 @@ def ingest_manual_document(
         "chunks": stored,
         "relevance_score": relevance_score,
     }
-    logger.info(f"Manual ingestion complete: {summary}")
+    _log_processing_status(
+        document_id=doc_id,
+        url=source_url,
+        status="processed",
+        explanation=(
+            f"manual ingestion completed successfully; {stored} chunks were stored and "
+            f"indexed (relevance_score={relevance_score})"
+        ),
+    )
     return summary

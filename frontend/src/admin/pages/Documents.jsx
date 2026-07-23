@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, ExternalLink, Pencil } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock3, ExternalLink, Pencil } from 'lucide-react'
 import { adminApi } from '../api'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -18,6 +18,61 @@ function isHttpUrl(value) {
 
 function formatDateTime(iso) {
   return iso ? iso.slice(0, 16).replace('T', ' ') : null
+}
+
+function processingIcon(level, size = 12) {
+  if (level === 'error' || level === 'warning') return <AlertCircle size={size} />
+  if (level === 'success') return <CheckCircle2 size={size} />
+  return <Clock3 size={size} />
+}
+
+function ProcessingLogTooltip({ log, documentId, documentTitle }) {
+  if (!log) return null
+
+  const tooltipId = `processing-log-${documentId}`
+  const iconTone = {
+    error: 'text-red-400 hover:bg-red-500/10 focus-visible:ring-red-400',
+    warning: 'text-yellow-400 hover:bg-yellow-500/10 focus-visible:ring-yellow-400',
+    success: 'text-green-400 hover:bg-green-500/10 focus-visible:ring-green-400',
+    info: 'text-blue-400 hover:bg-blue-500/10 focus-visible:ring-blue-400',
+    default: 'text-admin-muted hover:bg-admin-hover focus-visible:ring-admin-accent',
+  }[log.level] || 'text-admin-muted'
+
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label={`Processing information for ${documentTitle}`}
+        aria-describedby={tooltipId}
+        className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 ${iconTone}`}
+        onClick={event => event.stopPropagation()}
+      >
+        {processingIcon(log.level, 13)}
+      </button>
+      <span
+        id={tooltipId}
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-80 -translate-x-1/2 rounded-md border border-admin-border bg-zinc-950 px-3 py-2.5 text-left shadow-xl group-hover:block group-focus-within:block"
+      >
+        <span className="block text-[10px] font-semibold uppercase tracking-wider text-admin-muted">
+          Processing outcome
+        </span>
+        <span className="mt-1 block text-[11px] leading-4 text-admin-text">
+          {log.summary}
+        </span>
+        {log.details && (
+          <span className="mt-2 block border-t border-admin-border pt-2">
+            <span className="block text-[9px] font-semibold uppercase tracking-wider text-admin-muted">
+              Stored detail
+            </span>
+            <span className="mt-1 block max-h-36 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-zinc-300">
+              {log.details}
+            </span>
+          </span>
+        )}
+      </span>
+    </span>
+  )
 }
 
 export default function Documents() {
@@ -242,7 +297,14 @@ export default function Documents() {
                       <td className="px-4 py-3 text-admin-muted">{doc.site_name}</td>
                       <td className="px-4 py-3 text-admin-muted">{doc.document_type}</td>
                       <td className="px-4 py-3">
-                        <Badge status={doc.status}>{doc.status}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge status={doc.status}>{doc.status}</Badge>
+                          <ProcessingLogTooltip
+                            log={doc.processing_log}
+                            documentId={doc.id}
+                            documentTitle={doc.title}
+                          />
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-admin-muted">
                         {doc.relevance_score != null ? doc.relevance_score.toFixed(1) : '—'}

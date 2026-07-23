@@ -47,6 +47,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_token(username: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=_TOKEN_EXPIRE_HOURS)
     return jwt.encode(
@@ -76,6 +77,7 @@ def require_admin(
 # Login
 # ---------------------------------------------------------------------------
 
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -99,6 +101,7 @@ def login(body: LoginRequest) -> TokenResponse:
 # Stats
 # ---------------------------------------------------------------------------
 
+
 @router.get("/stats")
 def get_stats(
     _: str = Depends(require_admin),
@@ -106,9 +109,7 @@ def get_stats(
     vector_db=Depends(get_vector_db_client),
 ):
     total = db.query(Document).count()
-    processed = db.query(Document).filter(
-        Document.status == DocumentStatus.PROCESSED
-    ).count()
+    processed = db.query(Document).filter(Document.status == DocumentStatus.PROCESSED).count()
 
     # Crawl activity: document count per day over last 30 days
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
@@ -144,6 +145,35 @@ def get_stats(
 # Documents
 # ---------------------------------------------------------------------------
 
+
+def _document_processing_log(document: Document) -> dict:
+    """Build the current processing outcome shown in the admin document list."""
+    status = document.status.value if document.status else "unknown"
+    summaries = {
+        "discovered": "Discovered and waiting to enter the processing queue.",
+        "queued": "Downloaded and queued for content extraction and indexing.",
+        "processing": "Processing is in progress; the document is not searchable yet.",
+        "processed": "Processing completed successfully; extracted content was indexed.",
+        "skipped": "Processing was intentionally skipped; no content was indexed.",
+        "failed": "Processing failed; the document was not fully indexed.",
+        "unknown": "The processing state could not be determined.",
+    }
+    levels = {
+        "processed": "success",
+        "processing": "info",
+        "queued": "info",
+        "skipped": "warning",
+        "failed": "error",
+    }
+    return {
+        "level": levels.get(status, "default"),
+        "summary": summaries.get(status, summaries["unknown"]),
+        # A previous failure can leave error_log populated after a successful retry.
+        # Only expose it when it explains the current negative outcome.
+        "details": document.error_log if status in {"failed", "skipped"} else None,
+    }
+
+
 @router.get("/documents")
 def list_documents(
     site: Optional[str] = None,
@@ -176,32 +206,35 @@ def list_documents(
         llm = meta.get("llm_classification", {}) or {}
         relevance = llm.get("relevance_score")
         classification = doc.classification
-        items.append({
-            "id": str(doc.id),
-            "title": doc.title or "Untitled",
-            "url": doc.url,
-            "site_name": doc.site_name,
-            "document_type": doc.document_type or "unknown",
-            "status": doc.status.value if doc.status else "unknown",
-            "relevance_score": relevance,
-            "discovered_at": doc.discovered_at.isoformat() if doc.discovered_at else None,
-            "publicly_visible": doc.publicly_visible,
-            "published_at": doc.published_at.isoformat() if doc.published_at else None,
-            "published_by": doc.published_by,
-            "public_source_url": doc.public_source_url,
-            "summary": classification.summary if classification else None,
-            "document_category": classification.document_category if classification else None,
-            "key_practices": classification.key_practices if classification else None,
-            "topics": (classification.topics or []) if classification else [],
-            "crops": (classification.crops or []) if classification else [],
-            "regions": (classification.regions or []) if classification else [],
-            "classification_relevance_score": classification.relevance_score if classification else None,
-        })
+        items.append(
+            {
+                "id": str(doc.id),
+                "title": doc.title or "Untitled",
+                "url": doc.url,
+                "site_name": doc.site_name,
+                "document_type": doc.document_type or "unknown",
+                "status": doc.status.value if doc.status else "unknown",
+                "processing_log": _document_processing_log(doc),
+                "relevance_score": relevance,
+                "discovered_at": doc.discovered_at.isoformat() if doc.discovered_at else None,
+                "publicly_visible": doc.publicly_visible,
+                "published_at": doc.published_at.isoformat() if doc.published_at else None,
+                "published_by": doc.published_by,
+                "public_source_url": doc.public_source_url,
+                "summary": classification.summary if classification else None,
+                "document_category": classification.document_category if classification else None,
+                "key_practices": classification.key_practices if classification else None,
+                "topics": (classification.topics or []) if classification else [],
+                "crops": (classification.crops or []) if classification else [],
+                "regions": (classification.regions or []) if classification else [],
+                "classification_relevance_score": classification.relevance_score
+                if classification
+                else None,
+            }
+        )
 
     if sort == "relevance":
-        items.sort(
-            key=lambda d: (d["relevance_score"] is None, -(d["relevance_score"] or 0))
-        )
+        items.sort(key=lambda d: (d["relevance_score"] is None, -(d["relevance_score"] or 0)))
 
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
@@ -222,11 +255,15 @@ def update_document_publication(
 
     if body.publicly_visible:
         if doc.status != DocumentStatus.PROCESSED:
-            raise HTTPException(status_code=400, detail="Only processed documents can be published.")
+            raise HTTPException(
+                status_code=400, detail="Only processed documents can be published."
+            )
 
         effective_public_url = body.public_source_url or doc.public_source_url
         if doc.url.startswith("upload://"):
-            if not effective_public_url or not effective_public_url.startswith(("http://", "https://")):
+            if not effective_public_url or not effective_public_url.startswith(
+                ("http://", "https://")
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail="Uploaded documents require a public http(s) source URL before they can be published.",
@@ -276,6 +313,7 @@ def update_document_title(
 # Health
 # ---------------------------------------------------------------------------
 
+
 @router.get("/health")
 def check_health(_: str = Depends(require_admin)):
     results = {}
@@ -283,6 +321,7 @@ def check_health(_: str = Depends(require_admin)):
     # PostgreSQL
     try:
         from src.storage.postgres import PostgresClient
+
         PostgresClient().get_crawl_stats()
         results["PostgreSQL"] = "ok"
     except Exception as exc:
@@ -292,6 +331,7 @@ def check_health(_: str = Depends(require_admin)):
     # Vector DB
     try:
         from src.storage.vector_db import VectorDBClient
+
         label = f"Vector DB ({settings.vector_db_provider})"
         results[label] = "ok" if VectorDBClient().check_connection() else "error"
     except Exception as exc:
@@ -301,6 +341,7 @@ def check_health(_: str = Depends(require_admin)):
     # MinIO
     try:
         from src.storage.minio_client import MinIOClient
+
         MinIOClient().list_objects()
         results["MinIO"] = "ok"
     except Exception as exc:
@@ -310,6 +351,7 @@ def check_health(_: str = Depends(require_admin)):
     # LLM
     try:
         from src.llm.client import LLMClient
+
         results["LLM Service"] = "ok" if LLMClient().check_connection() else "error"
     except Exception as exc:
         logger.warning(f"LLM health check failed: {exc}")
@@ -326,6 +368,7 @@ def check_health(_: str = Depends(require_admin)):
     if settings.translation_enabled and settings.sunbird_api_key:
         try:
             from src.translation import TranslationClient
+
             results["Sunbird AI"] = "ok" if TranslationClient().check_connection() else "error"
         except Exception:
             results["Sunbird AI"] = "error"
@@ -338,6 +381,7 @@ def check_health(_: str = Depends(require_admin)):
 # ---------------------------------------------------------------------------
 # Knowledge Q&A
 # ---------------------------------------------------------------------------
+
 
 class QARequest(BaseModel):
     question: str
@@ -374,6 +418,7 @@ def knowledge_qa(
 # Config (read-only)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/config")
 def get_config(_: str = Depends(require_admin)):
     def _mask(val: str) -> str:
@@ -382,9 +427,15 @@ def get_config(_: str = Depends(require_admin)):
     return {
         "llm": {
             "provider": settings.llm_provider,
-            "model": settings.openai_model if settings.llm_provider == "openai" else settings.ollama_model,
-            "temperature": settings.openai_temperature if settings.llm_provider == "openai" else settings.ollama_temperature,
-            "max_tokens": settings.openai_max_tokens if settings.llm_provider == "openai" else settings.ollama_max_tokens,
+            "model": settings.openai_model
+            if settings.llm_provider == "openai"
+            else settings.ollama_model,
+            "temperature": settings.openai_temperature
+            if settings.llm_provider == "openai"
+            else settings.ollama_temperature,
+            "max_tokens": settings.openai_max_tokens
+            if settings.llm_provider == "openai"
+            else settings.ollama_max_tokens,
             "openai_api_key": _mask(settings.openai_api_key),
         },
         "crawl": {
@@ -423,6 +474,7 @@ def get_config(_: str = Depends(require_admin)):
 # Search
 # ---------------------------------------------------------------------------
 
+
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 10
@@ -436,6 +488,7 @@ def semantic_search(
     vector_db=Depends(get_vector_db_client),
 ):
     from src.llm.embeddings import EmbeddingClient
+
     embedder = EmbeddingClient()
     query_vec = embedder.embed(body.query)
     results = vector_db.search(
@@ -449,6 +502,7 @@ def semantic_search(
 # ---------------------------------------------------------------------------
 # Crawl triggers
 # ---------------------------------------------------------------------------
+
 
 async def _trigger_prefect_deployment(deployment_name: str) -> dict:
     url = f"{settings.prefect_api_url}/deployments/name/{deployment_name}/create_flow_run"
@@ -468,23 +522,20 @@ async def _trigger_prefect_deployment(deployment_name: str) -> dict:
 
 @router.post("/crawl/full")
 async def trigger_full_crawl(_: str = Depends(require_admin)):
-    result = await _trigger_prefect_deployment(
-        "post_harvest_scraper/daily-scraper-production"
-    )
+    result = await _trigger_prefect_deployment("post_harvest_scraper/daily-scraper-production")
     return {"status": "triggered", "flow_run_id": result.get("id")}
 
 
 @router.post("/crawl/incremental")
 async def trigger_incremental_crawl(_: str = Depends(require_admin)):
-    result = await _trigger_prefect_deployment(
-        "incremental_update/incremental-update-production"
-    )
+    result = await _trigger_prefect_deployment("incremental_update/incremental-update-production")
     return {"status": "triggered", "flow_run_id": result.get("id")}
 
 
 # ---------------------------------------------------------------------------
 # Document ingest
 # ---------------------------------------------------------------------------
+
 
 @router.post("/documents/ingest")
 async def ingest_document(
@@ -495,9 +546,7 @@ async def ingest_document(
     _: str = Depends(require_admin),
 ):
     if file is None and not url:
-        raise HTTPException(
-            status_code=400, detail="Provide either a file upload or a url field."
-        )
+        raise HTTPException(status_code=400, detail="Provide either a file upload or a url field.")
 
     from src.flows.manual_ingestion import ingest_manual_document
 
@@ -523,13 +572,17 @@ async def ingest_document(
 # Chat quality (BertScore)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/chat-quality/stats")
 def chat_quality_stats(
     _: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Aggregate BertScore faithfulness statistics over all assistant messages."""
-    row = db.execute(text("""
+    row = (
+        db.execute(
+            text(
+                """
         SELECT
             COUNT(*) FILTER (WHERE bert_score IS NOT NULL)            AS total_scored,
             COUNT(*) FILTER (WHERE bert_score IS NULL)                AS total_unscored,
@@ -551,7 +604,12 @@ def chat_quality_stats(
                   AND (bert_score->>'f1')::float >= 0.8)              AS bucket_80_100
         FROM chat_messages
         WHERE role = 'assistant'
-    """)).mappings().one()
+    """
+            )
+        )
+        .mappings()
+        .one()
+    )
 
     return {
         "total_scored": row["total_scored"],
@@ -589,7 +647,10 @@ def chat_quality(
 
     where_clause = " AND ".join(filters)
 
-    rows = db.execute(text(f"""
+    rows = (
+        db.execute(
+            text(
+                f"""
         SELECT
             am.id          AS message_id,
             am.session_id,
@@ -610,13 +671,27 @@ def chat_quality(
         WHERE {where_clause}
         ORDER BY am.created_at DESC
         LIMIT :limit OFFSET :offset
-    """), {"limit": limit, "offset": offset}).mappings().all()
+    """
+            ),
+            {"limit": limit, "offset": offset},
+        )
+        .mappings()
+        .all()
+    )
 
-    total_row = db.execute(text(f"""
+    total_row = (
+        db.execute(
+            text(
+                f"""
         SELECT COUNT(*) AS cnt
         FROM chat_messages am
         WHERE {where_clause}
-    """)).mappings().one()
+    """
+            )
+        )
+        .mappings()
+        .one()
+    )
 
     items = [
         {

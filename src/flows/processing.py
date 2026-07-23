@@ -24,8 +24,34 @@ from src.utils.text_processing import clean_text, chunk_text
 
 
 # ---------------------------------------------------------------------------
+# Helper: consistent, explanatory processing outcome logs
+# ---------------------------------------------------------------------------
+
+
+def _log_processing_status(
+    *,
+    document_id: str,
+    url: str,
+    status: str,
+    explanation: str,
+) -> None:
+    """Log a document status with enough context to understand its outcome."""
+    message = (
+        f"Document processing status={status} document_id={document_id} "
+        f"url={url}: {explanation}"
+    )
+    if status == "failed":
+        logger.error(message)
+    elif status == "skipped":
+        logger.warning(message)
+    else:
+        logger.info(message)
+
+
+# ---------------------------------------------------------------------------
 # Helper: determine document type from URL / mime type
 # ---------------------------------------------------------------------------
+
 
 def _detect_document_type(url: str, mime_type: str = "") -> str:
     url_lower = url.lower()
@@ -47,6 +73,7 @@ def _detect_document_type(url: str, mime_type: str = "") -> str:
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
+
 
 @task(
     name="download_document",
@@ -92,10 +119,7 @@ def download_document(document_id: str, url: str) -> Optional[Dict]:
         # Update document record
         db.update_document_status(UUID(document_id), DocumentStatus.QUEUED)
 
-        logger.info(
-            f"Downloaded {url} → {object_name} "
-            f"({file_size} bytes, type={doc_type})"
-        )
+        logger.info(f"Downloaded {url} → {object_name} " f"({file_size} bytes, type={doc_type})")
         return {
             "minio_path": object_name,
             "file_hash": file_hash,
@@ -135,25 +159,26 @@ def extract_content(download_result: Dict, url: str = "") -> Optional[str]:
                 tmp.write(content)
                 tmp_path = tmp.name
             from src.extractors.pdf_extractor import extract_pdf_full
+
             result = extract_pdf_full(tmp_path)
             text = result.get("text", "")
             Path(tmp_path).unlink(missing_ok=True)
 
         elif doc_type == "video":
             from src.extractors.video_extractor import extract_video_full
+
             video_data = extract_video_full(url)
             text = video_data.get("text", "")
 
         else:  # html or unknown
             from src.extractors.html_extractor import extract_html_content
+
             text = extract_html_content(content.decode("utf-8", errors="replace"), url=url) or ""
 
         text = clean_text(text)
 
         if len(text) < settings.min_content_length:
-            logger.warning(
-                f"Extracted text too short ({len(text)} chars) for {url}"
-            )
+            logger.warning(f"Extracted text too short ({len(text)} chars) for {url}")
             return None
 
         # Truncate to max allowed
@@ -229,13 +254,15 @@ def chunk_and_embed(
             "relevance_score": classification.get("relevance_score", 0),
             "created_at": datetime.utcnow().isoformat(),
         }
-        results.append({
-            "chunk_index": i,
-            "text": chunk_text_val,
-            "vector": vector,
-            "token_count": estimate_tokens(chunk_text_val),
-            "payload": payload,
-        })
+        results.append(
+            {
+                "chunk_index": i,
+                "text": chunk_text_val,
+                "vector": vector,
+                "token_count": estimate_tokens(chunk_text_val),
+                "payload": payload,
+            }
+        )
 
     logger.info(f"Created {len(results)} chunks with embeddings for document {document_id}")
     return results
@@ -266,11 +293,13 @@ def store_chunks(
 
     for chunk in chunks:
         from uuid import uuid4
+
         chunk_uuid = str(uuid4())
 
         # PostgreSQL
         with db.get_session() as session:
             from src.storage.models import ContentChunk
+
             db_chunk = ContentChunk(
                 document_id=UUID(document_id),
                 chunk_index=chunk["chunk_index"],
@@ -304,6 +333,7 @@ def store_chunks(
 # Main processing flow
 # ---------------------------------------------------------------------------
 
+
 @flow(
     name="process_document",
     retries=1,
@@ -333,12 +363,33 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
 
     try:
         db.update_document_status(UUID(document_id), DocumentStatus.PROCESSING)
+        _log_processing_status(
+            document_id=document_id,
+            url=url,
+            status="processing",
+            explanation="pipeline started; the document is being downloaded and indexed",
+        )
 
         # 1. Download
         download_result = download_document(document_id, url)
         if not download_result:
             # download_document already logged the error and set status to FAILED
-            return {"document_id": document_id, "url": url, "status": "failed", "chunks": 0}
+            _log_processing_status(
+                document_id=document_id,
+                url=url,
+                status="failed",
+                explanation=(
+                    "download or raw-file storage failed; the document was not extracted "
+                    "or indexed (see the preceding download error)"
+                ),
+            )
+            return {
+                "document_id": document_id,
+                "url": url,
+                "status": "failed",
+                "chunks": 0,
+                "reason": "download_failed",
+            }
 
         # 2. Extract
         text = extract_content(download_result, url=url)
@@ -348,7 +399,22 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
                 DocumentStatus.SKIPPED,
                 error_log="No extractable content",
             )
-            return {"document_id": document_id, "status": "skipped", "chunks": 0}
+            _log_processing_status(
+                document_id=document_id,
+                url=url,
+                status="skipped",
+                explanation=(
+                    "no usable text was extracted (content may be empty, too short, "
+                    "unsupported, or image-only); no chunks were indexed"
+                ),
+            )
+            return {
+                "document_id": document_id,
+                "url": url,
+                "status": "skipped",
+                "chunks": 0,
+                "reason": "no_extractable_content",
+            }
 
         # 3. Classify
         classification = classify_document_content(text, url=url)
@@ -372,15 +438,31 @@ def process_document(document_id: str, url: str, site_name: str = "") -> Dict:
             "chunks": stored,
             "relevance_score": classification.get("relevance_score", 0),
         }
-        logger.info(f"Processing complete: {summary}")
+        _log_processing_status(
+            document_id=document_id,
+            url=url,
+            status="processed",
+            explanation=(
+                f"pipeline completed successfully; {stored} chunks were stored and indexed "
+                f"(relevance_score={summary['relevance_score']})"
+            ),
+        )
         return summary
 
     except Exception as e:
-        logger.error(f"Processing failed for {url}: {e}")
         db.update_document_status(
             UUID(document_id),
             DocumentStatus.FAILED,
             error_log=str(e),
+        )
+        _log_processing_status(
+            document_id=document_id,
+            url=url,
+            status="failed",
+            explanation=(
+                f"pipeline raised {type(e).__name__} during extraction, classification, "
+                f"embedding, or storage; document was not fully indexed: {e}"
+            ),
         )
         raise
 
@@ -417,9 +499,25 @@ def process_documents_batch(
             )
             results.append(result)
         except Exception as e:
-            logger.error(f"Document processing failed for {doc.get('url')}: {e}")
-            results.append({"status": "failed", "error": str(e)})
+            results.append(
+                {
+                    "document_id": str(doc.get("id", "")),
+                    "url": doc.get("url", ""),
+                    "status": "failed",
+                    "chunks": 0,
+                    "reason": "processing_exception",
+                    "error": str(e),
+                }
+            )
 
-    processed = sum(1 for r in results if r.get("status") == "processed")
-    logger.info(f"Batch complete: {processed}/{len(documents)} documents processed")
+    status_counts = {
+        status: sum(1 for result in results if result.get("status") == status)
+        for status in ("processed", "skipped", "failed")
+    }
+    logger.info(
+        f"Document processing batch complete: total={len(documents)}, "
+        f"processed={status_counts['processed']} (successfully indexed), "
+        f"skipped={status_counts['skipped']} (intentionally not indexed), "
+        f"failed={status_counts['failed']} (pipeline error)"
+    )
     return results

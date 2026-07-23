@@ -1,7 +1,6 @@
 """
 Main orchestration flow – ties together discovery and processing pipelines
 """
-from datetime import timedelta
 from typing import List, Dict, Optional
 from loguru import logger
 from prefect import flow, task
@@ -18,6 +17,7 @@ from src.flows.processing import process_documents_batch
 # ---------------------------------------------------------------------------
 # Helper tasks
 # ---------------------------------------------------------------------------
+
 
 @task(name="fetch_pending_documents")
 def fetch_pending_documents(
@@ -40,10 +40,7 @@ def fetch_pending_documents(
         status=DocumentStatus.DISCOVERED,
         limit=limit,
     )
-    result = [
-        {"id": str(doc.id), "url": doc.url, "site_name": doc.site_name}
-        for doc in docs
-    ]
+    result = [{"id": str(doc.id), "url": doc.url, "site_name": doc.site_name} for doc in docs]
     logger.info(f"Found {len(result)} documents pending processing")
     return result
 
@@ -106,6 +103,7 @@ def refresh_vector_index() -> Dict:
 # High-level flows
 # ---------------------------------------------------------------------------
 
+
 @flow(
     name="post_harvest_scraper",
     task_runner=ConcurrentTaskRunner(),
@@ -158,8 +156,7 @@ def main_scraper_flow(
             "per_site": {r["site_name"]: r for r in discovery_results},
         }
         logger.info(
-            f"Discovery complete: "
-            f"{summary['discovery']['total_stored']} documents stored"
+            f"Discovery complete: " f"{summary['discovery']['total_stored']} documents stored"
         )
 
     # Phase 2: Processing
@@ -168,10 +165,13 @@ def main_scraper_flow(
         if pending:
             processing_results = process_documents_batch(pending)
             processed = sum(1 for r in processing_results if r.get("status") == "processed")
+            skipped = sum(1 for r in processing_results if r.get("status") == "skipped")
+            failed = sum(1 for r in processing_results if r.get("status") == "failed")
             summary["processing"] = {
                 "total_queued": len(pending),
                 "total_processed": processed,
-                "total_failed": len(pending) - processed,
+                "total_skipped": skipped,
+                "total_failed": failed,
             }
         else:
             logger.info("No documents pending processing")
@@ -253,8 +253,7 @@ def reprocess_failed_flow(limit: int = 50) -> Dict:
     logger.info(f"Reset {len(failed_docs)} failed documents for reprocessing")
 
     documents = [
-        {"id": str(doc.id), "url": doc.url, "site_name": doc.site_name}
-        for doc in failed_docs
+        {"id": str(doc.id), "url": doc.url, "site_name": doc.site_name} for doc in failed_docs
     ]
     results = process_documents_batch(documents)
     processed = sum(1 for r in results if r.get("status") == "processed")
