@@ -14,7 +14,18 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from src.config.settings import settings
-from src.api.routes import access, admin, admin_access, chat, health, library, session, whatsapp
+from src.api.routes import (
+    access,
+    admin,
+    admin_access,
+    admin_catalogue,
+    catalogue,
+    chat,
+    health,
+    library,
+    session,
+    whatsapp,
+)
 from src.api.services.access_service import AccessError, access_error_handler
 
 
@@ -47,6 +58,11 @@ async def lifespan(app: FastAPI):
         app.state.llm_client_openai = LLMClient(provider="openai")
     app.state.embedding_client = EmbeddingClient()
     app.state.vector_db_client = VectorDBClient()
+    app.state.catalogue_vector_db_client = VectorDBClient(
+        collection=settings.catalogue_collection_name
+    )
+    app.state.vector_db_client.ensure_collection()
+    app.state.catalogue_vector_db_client.ensure_collection()
     app.state.translation_client = TranslationClient()
     app.state.whatsapp_service = WhatsAppService(
         token=settings.whatsapp_token,
@@ -97,3 +113,5 @@ app.include_router(admin.router)
 app.include_router(admin_access.router)
 app.include_router(access.router)
 app.include_router(library.router)
+app.include_router(catalogue.router)
+app.include_router(admin_catalogue.router)
