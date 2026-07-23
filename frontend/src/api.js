@@ -53,6 +53,34 @@ export async function getDocumentDetail(id) {
   return res.json()
 }
 
+export async function getCatalogue({ q, offset = 0, limit = 20 } = {}) {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) })
+  if (q) params.set('q', q)
+  const res = await fetch(`${BASE_URL}/catalogue?${params}`)
+  if (!res.ok) throw new Error(`Failed to load catalogue: ${res.status}`)
+  return res.json()
+}
+
+export async function getCatalogueEntry(id, language = 'eng') {
+  const res = await fetch(
+    `${BASE_URL}/catalogue/${encodeURIComponent(id)}?language=${encodeURIComponent(language)}`,
+  )
+  if (!res.ok) {
+    const err = new Error(`Failed to load catalogue entry: ${res.status}`)
+    err.status = res.status
+    throw err
+  }
+  return res.json()
+}
+
+export async function markCatalogueHelpful(id) {
+  const res = await fetch(`${BASE_URL}/catalogue/${encodeURIComponent(id)}/helpful`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(`Failed to record feedback: ${res.status}`)
+  return res.json()
+}
+
 export async function getChatModels() {
   const res = await fetch(`${BASE_URL}/chat/models`)
   if (!res.ok) throw new Error(`Failed to load chat models: ${res.status}`)

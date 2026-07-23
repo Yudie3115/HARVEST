@@ -74,6 +74,9 @@ export default function Header() {
         <NavLink to="/documents" style={navLinkStyle}>
           Documents
         </NavLink>
+        <NavLink to="/catalogue" style={navLinkStyle}>
+          Catalogue
+        </NavLink>
       </nav>
     </header>
   )

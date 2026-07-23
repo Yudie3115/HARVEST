@@ -115,4 +115,11 @@ export const adminApi = {
     if (params.max_f1 != null) q.set('max_f1', params.max_f1)
     return request('GET', `/admin/chat-quality?${q}`)
   },
+
+  getCataloguePending: () => request('GET', '/admin/catalogue/pending'),
+  getCatalogueApproved: () => request('GET', '/admin/catalogue/approved'),
+  approveCatalogue: (id) => request('POST', `/admin/catalogue/${id}/approve`),
+  rejectCatalogue: (id) => request('POST', `/admin/catalogue/${id}/reject`),
+  retractCatalogue: (id) => request('POST', `/admin/catalogue/${id}/retract`),
+  retryCatalogue: (id) => request('POST', `/admin/catalogue/${id}/retry-publish`),
 }

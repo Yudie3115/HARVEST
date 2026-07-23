@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import ChatApp from './ChatApp'
 import DocumentsPage from './library/pages/DocumentsPage'
 import DocumentDetailPage from './library/pages/DocumentDetailPage'
+import CataloguePage from './catalogue/pages/CataloguePage'
+import CatalogueDetailPage from './catalogue/pages/CatalogueDetailPage'
 import LoginPage from './admin/LoginPage'
 import AdminLayout from './admin/AdminLayout'
 import Overview from './admin/pages/Overview'
@@ -11,6 +13,7 @@ import QAPage from './admin/pages/QA'
 import ConfigPage from './admin/pages/Config'
 import AddDocumentPage from './admin/pages/AddDocument'
 import ChatQualityPage from './admin/pages/ChatQuality'
+import CatalogueAdminPage from './admin/pages/Catalogue'
 import { adminApi } from './admin/api'
 
 function ProtectedAdmin({ children }) {
@@ -29,6 +32,8 @@ export default function App() {
       {/* Public documents library */}
       <Route path="/documents" element={<DocumentsPage />} />
       <Route path="/documents/:id" element={<DocumentDetailPage />} />
+      <Route path="/catalogue" element={<CataloguePage />} />
+      <Route path="/catalogue/:id" element={<CatalogueDetailPage />} />
 
       {/* Admin login */}
       <Route path="/admin/login" element={<LoginPage />} />
@@ -50,6 +55,7 @@ export default function App() {
         <Route path="config" element={<ConfigPage />} />
         <Route path="add-document" element={<AddDocumentPage />} />
         <Route path="chat-quality" element={<ChatQualityPage />} />
+        <Route path="catalogue" element={<CatalogueAdminPage />} />
       </Route>
     </Routes>
   )
