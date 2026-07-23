@@ -488,6 +488,12 @@ Index(
     unique=True,
     postgresql_where=(AccessGrant.status == "active"),
 )
+Index(
+    "uq_catalogue_entries_source_message",
+    CatalogueEntry.source_message_id,
+    unique=True,
+    postgresql_where=CatalogueEntry.source_message_id.isnot(None),
+)
 
 Index('idx_documents_status_site', Document.status, Document.site_name)
 Index('idx_documents_discovered_status', Document.discovered_at, Document.status)
