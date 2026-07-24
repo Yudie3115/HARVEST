@@ -28,3 +28,4 @@ frontend/*.local
 .claude/
 /docs/superpowers/
 .superpowers/
+.playwright-mcp
