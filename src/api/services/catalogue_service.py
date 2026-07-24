@@ -10,6 +10,11 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
+from src.api.services.operational_metrics import (
+    CATALOGUE_CANDIDATE_METRIC,
+    CATALOGUE_WORKER_METRIC,
+    record_metric,
+)
 from src.llm.bert_scoring import get_scorer
 from src.storage.models import (
     BackgroundJob,
@@ -130,6 +135,13 @@ def score_and_create_candidate(
     if existing:
         return existing
     if not settings.bertscore_enabled:
+        record_metric(
+            db,
+            CATALOGUE_CANDIDATE_METRIC,
+            0,
+            component="catalogue",
+            metadata={"outcome": "scoring_disabled"},
+        )
         return None
 
     assistant = db.get(ChatMessage, message_id)
@@ -149,17 +161,40 @@ def score_and_create_candidate(
     answer_en = assistant.english_content or assistant.content
     score = get_scorer().score(answer_en, references)
     if not score:
+        record_metric(
+            db,
+            CATALOGUE_CANDIDATE_METRIC,
+            0,
+            component="catalogue",
+            metadata={"outcome": "scoring_failed"},
+        )
         return None
     assistant.bert_score = score
     db.commit()
 
     grounding_score = float(score["f1"])
     if grounding_score < settings.catalogue_min_faithfulness:
+        record_metric(
+            db,
+            CATALOGUE_CANDIDATE_METRIC,
+            grounding_score,
+            component="catalogue",
+            unit="similarity",
+            metadata={"outcome": "below_faithfulness"},
+        )
         return None
 
     evaluation = llm_client.evaluate_catalogue_candidate(user.content, answer_en)
     llm_score = evaluation["worth_cataloguing_score"]
     if settings.catalogue_mode == "manual" and llm_score < settings.catalogue_min_score:
+        record_metric(
+            db,
+            CATALOGUE_CANDIDATE_METRIC,
+            grounding_score,
+            component="catalogue",
+            unit="similarity",
+            metadata={"outcome": "below_llm_score", "llm_score": llm_score},
+        )
         return None
 
     question = evaluation["optimised_question"]
@@ -171,9 +206,7 @@ def score_and_create_candidate(
         )
 
     candidates = (
-        db.query(CatalogueEntry)
-        .filter(CatalogueEntry.status.in_(_CATALOGUE_STATUSES))
-        .all()
+        db.query(CatalogueEntry).filter(CatalogueEntry.status.in_(_CATALOGUE_STATUSES)).all()
     )
     duplicate = max(
         candidates,
@@ -186,6 +219,14 @@ def score_and_create_candidate(
         >= settings.catalogue_duplicate_threshold
     ):
         duplicate.candidate_duplicate_count += 1
+        record_metric(
+            db,
+            CATALOGUE_CANDIDATE_METRIC,
+            grounding_score,
+            component="catalogue",
+            unit="similarity",
+            metadata={"outcome": "duplicate", "llm_score": llm_score},
+        )
         return duplicate
 
     entry = CatalogueEntry(
@@ -200,6 +241,18 @@ def score_and_create_candidate(
     )
     db.add(entry)
     db.flush()
+    record_metric(
+        db,
+        CATALOGUE_CANDIDATE_METRIC,
+        grounding_score,
+        component="catalogue",
+        unit="similarity",
+        metadata={
+            "outcome": "candidate_created",
+            "llm_score": llm_score,
+            "mode": settings.catalogue_mode,
+        },
+    )
     if settings.catalogue_mode == "auto":
         enqueue_publication_job(db, entry.id)
     return entry
@@ -339,6 +392,17 @@ def run_claimed_job(
         job = db.get(BackgroundJob, job.id)
         job.status = BackgroundJobStatusEnum.completed
         job.last_error = None
+        record_metric(
+            db,
+            CATALOGUE_WORKER_METRIC,
+            1,
+            component="catalogue_worker",
+            metadata={
+                "outcome": "completed",
+                "job_type": job.job_type,
+                "attempts": job.attempts,
+            },
+        )
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -346,8 +410,22 @@ def run_claimed_job(
         job.last_error = str(exc)[:1000]
         if job.attempts >= settings.catalogue_job_max_attempts:
             job.status = BackgroundJobStatusEnum.failed
+            outcome = "failed"
         else:
             job.status = BackgroundJobStatusEnum.pending
             job.available_at = _now() + timedelta(seconds=min(300, 2**job.attempts))
+            outcome = "retry_scheduled"
+        record_metric(
+            db,
+            CATALOGUE_WORKER_METRIC,
+            0,
+            component="catalogue_worker",
+            metadata={
+                "outcome": outcome,
+                "job_type": job.job_type,
+                "attempts": job.attempts,
+                "error_type": type(exc).__name__,
+            },
+        )
         db.commit()
         logger.exception(f"Catalogue job {job.id} failed")
