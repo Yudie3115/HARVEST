@@ -15,7 +15,10 @@ const WELCOME = {
   sources: [],
 }
 
-export function useChat(sessionId, { onSessionExpired } = {}) {
+export function useChat(
+  sessionId,
+  { token, initialQuestion, onInitialQuestionConsumed, onSessionExpired, onAccessError } = {},
+) {
   const [messages, setMessages] = useState([WELCOME])
   const [isLoading, setIsLoading] = useState(false)
   const [detectedLanguage, setDetectedLanguage] = useState('eng')
@@ -24,6 +27,7 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
     () => localStorage.getItem(MODEL_STORAGE_KEY) || null
   )
   const [modelOptions, setModelOptions] = useState(FALLBACK_MODEL_OPTIONS)
+  const [historyReady, setHistoryReady] = useState(false)
 
   const setModelPreference = useCallback((value) => {
     if (value) localStorage.setItem(MODEL_STORAGE_KEY, value)
@@ -55,9 +59,15 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
 
   // Reload message history when sessionId becomes available (e.g. page refresh)
   useEffect(() => {
-    if (!sessionId) return
-    getHistory(sessionId)
+    if (!sessionId) {
+      setHistoryReady(false)
+      return
+    }
+    let cancelled = false
+    setHistoryReady(false)
+    getHistory(sessionId, token)
       .then((data) => {
+        if (cancelled) return
         if (!data.messages?.length) return
         const loaded = data.messages.map((msg, i) => ({
           id: `h-${i}`,
@@ -76,7 +86,13 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
       .catch(() => {
         // History load failure is non-fatal — keep welcome message
       })
-  }, [sessionId])
+      .finally(() => {
+        if (!cancelled) setHistoryReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, token])
 
   const send = useCallback(
     async (text) => {
@@ -98,7 +114,7 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
       setIsLoading(true)
 
       const streamIntoMessage = (activeSessionId) =>
-        streamMessage(activeSessionId, text.trim(), languageOverride, modelPreference, {
+        streamMessage(activeSessionId, text.trim(), languageOverride, modelPreference, token, {
           onToken: (token) => {
             setMessages((prev) =>
               prev.map((m) =>
@@ -124,7 +140,8 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
             )
             setIsLoading(false)
           },
-          onError: (message) => {
+          onError: (message, error) => {
+            if (error?.code) onAccessError?.(error)
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
@@ -166,8 +183,29 @@ export function useChat(sessionId, { onSessionExpired } = {}) {
         }
       }
     },
-    [sessionId, isLoading, languageOverride, modelPreference, onSessionExpired]
+    [
+      sessionId,
+      isLoading,
+      languageOverride,
+      modelPreference,
+      onSessionExpired,
+      onAccessError,
+      token,
+    ]
   )
+
+  useEffect(() => {
+    if (!sessionId || !initialQuestion || isLoading || !historyReady) return
+    onInitialQuestionConsumed?.()
+    send(initialQuestion)
+  }, [
+    sessionId,
+    initialQuestion,
+    isLoading,
+    historyReady,
+    onInitialQuestionConsumed,
+    send,
+  ])
 
   return {
     messages,

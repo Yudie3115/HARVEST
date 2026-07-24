@@ -122,4 +122,16 @@ export const adminApi = {
   rejectCatalogue: (id) => request('POST', `/admin/catalogue/${id}/reject`),
   retractCatalogue: (id) => request('POST', `/admin/catalogue/${id}/retract`),
   retryCatalogue: (id) => request('POST', `/admin/catalogue/${id}/retry-publish`),
+
+  getAccessCodes: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.status) q.set('status', params.status)
+    if (params.offset != null) q.set('offset', params.offset)
+    if (params.limit != null) q.set('limit', params.limit)
+    return request('GET', `/admin/access-codes?${q}`)
+  },
+  createAccessCode: (body) => request('POST', '/admin/access-codes', body),
+  updateAccessCode: (id, body) => request('PATCH', `/admin/access-codes/${id}`, body),
+  revokeAccessCode: (id) => request('POST', `/admin/access-codes/${id}/revoke`),
+  reactivateAccessCode: (id) => request('POST', `/admin/access-codes/${id}/reactivate`),
 }

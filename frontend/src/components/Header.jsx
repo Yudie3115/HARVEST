@@ -69,7 +69,7 @@ export default function Header() {
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         <NavLink to="/" end style={navLinkStyle}>
-          Chat
+          Ask
         </NavLink>
         <NavLink to="/documents" style={navLinkStyle}>
           Documents

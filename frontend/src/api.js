@@ -1,25 +1,67 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export async function createSession(channel = 'web') {
-  const res = await fetch(`${BASE_URL}/session/new`, {
+async function apiError(res, fallback) {
+  const body = await res.json().catch(() => null)
+  const error = new Error(body?.error?.message || body?.detail || fallback)
+  error.status = res.status
+  error.code = body?.error?.code || null
+  error.periodResetsAt = body?.error?.period_resets_at || null
+  return error
+}
+
+function protectedHeaders(token, json = false) {
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { 'X-Access-Token': token } : {}),
+  }
+}
+
+export async function redeemAccessCode(code) {
+  const res = await fetch(`${BASE_URL}/access/redeem`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+  if (!res.ok) throw await apiError(res, 'Could not redeem this access code.')
+  return res.json()
+}
+
+export async function getAccessStatus(token) {
+  const res = await fetch(`${BASE_URL}/access/status`, {
+    headers: protectedHeaders(token),
+  })
+  if (!res.ok) throw await apiError(res, 'Could not verify access.')
+  return res.json()
+}
+
+export async function createSession(channel = 'web', token = null) {
+  const res = await fetch(`${BASE_URL}/session/new`, {
+    method: 'POST',
+    headers: protectedHeaders(token, true),
     body: JSON.stringify({ channel }),
   })
   if (!res.ok) {
-    const err = new Error('Failed to create session')
-    err.status = res.status
-    throw err
+    throw await apiError(res, 'Failed to create session')
   }
   return res.json()
 }
 
-export async function getHistory(sessionId) {
-  const res = await fetch(`${BASE_URL}/session/${sessionId}/history`)
+export async function createCatalogueSession(catalogueEntryId, token) {
+  const res = await fetch(`${BASE_URL}/session/from-catalogue`, {
+    method: 'POST',
+    headers: protectedHeaders(token, true),
+    body: JSON.stringify({ catalogue_entry_id: catalogueEntryId }),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to create a follow-up session')
+  return res.json()
+}
+
+export async function getHistory(sessionId, token = null) {
+  const res = await fetch(`${BASE_URL}/session/${sessionId}/history`, {
+    headers: protectedHeaders(token),
+  })
   if (!res.ok) {
-    const err = new Error(`Failed to load history: ${res.status}`)
-    err.status = res.status
-    throw err
+    throw await apiError(res, `Failed to load history: ${res.status}`)
   }
   return res.json()
 }
@@ -81,32 +123,50 @@ export async function markCatalogueHelpful(id) {
   return res.json()
 }
 
+export async function markCatalogueRejectedMatch(id) {
+  const res = await fetch(`${BASE_URL}/catalogue/${encodeURIComponent(id)}/rejected-match`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(`Failed to record feedback: ${res.status}`)
+  return res.json()
+}
+
+export async function matchCatalogue(question) {
+  const res = await fetch(`${BASE_URL}/catalogue/match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+  if (!res.ok) throw await apiError(res, 'Could not check the catalogue.')
+  return res.json()
+}
+
 export async function getChatModels() {
   const res = await fetch(`${BASE_URL}/chat/models`)
   if (!res.ok) throw new Error(`Failed to load chat models: ${res.status}`)
   return res.json()
 }
 
-export async function sendMessage(sessionId, message, languageOverride = null) {
+export async function sendMessage(sessionId, message, languageOverride = null, token = null) {
   const res = await fetch(`${BASE_URL}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: protectedHeaders(token, true),
     body: JSON.stringify({
       session_id: sessionId,
       message,
       language_override: languageOverride,
     }),
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) throw await apiError(res, `API error: ${res.status}`)
   return res.json()
 }
 
-export async function streamMessage(sessionId, message, languageOverride = null, modelPreference = null, { onToken, onDone, onError }) {
+export async function streamMessage(sessionId, message, languageOverride = null, modelPreference = null, token = null, { onToken, onDone, onError }) {
   let res
   try {
     res = await fetch(`${BASE_URL}/chat/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: protectedHeaders(token, true),
       body: JSON.stringify({
         session_id: sessionId,
         message,
@@ -120,10 +180,14 @@ export async function streamMessage(sessionId, message, languageOverride = null,
   }
 
   if (!res.ok) {
-    if (res.status === 429) onError('Too many requests — please wait a moment before trying again.')
-    else if (res.status === 404) onError('Session expired — starting a new chat.')
-    else onError('Something went wrong. Please try again.')
-    return { ok: false, status: res.status }
+    const error = await apiError(res, 'Something went wrong. Please try again.')
+    onError(error.message, error)
+    return {
+      ok: false,
+      status: res.status,
+      code: error.code,
+      periodResetsAt: error.periodResetsAt,
+    }
   }
 
   const reader = res.body.getReader()
@@ -149,7 +213,8 @@ export async function streamMessage(sessionId, message, languageOverride = null,
             onError(
               streamErrorStatus === 404
                 ? 'Session expired — starting a new chat.'
-                : event.message
+                : event.message,
+              event,
             )
           }
         } catch {

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import ChatApp from './ChatApp'
+import AskPage from './ask/AskPage'
 import DocumentsPage from './library/pages/DocumentsPage'
 import DocumentDetailPage from './library/pages/DocumentDetailPage'
 import CataloguePage from './catalogue/pages/CataloguePage'
@@ -14,6 +15,7 @@ import ConfigPage from './admin/pages/Config'
 import AddDocumentPage from './admin/pages/AddDocument'
 import ChatQualityPage from './admin/pages/ChatQuality'
 import CatalogueAdminPage from './admin/pages/Catalogue'
+import AccessCodesPage from './admin/pages/AccessCodes'
 import { adminApi } from './admin/api'
 
 function ProtectedAdmin({ children }) {
@@ -26,8 +28,9 @@ function ProtectedAdmin({ children }) {
 export default function App() {
   return (
     <Routes>
-      {/* Chat interface */}
-      <Route path="/" element={<ChatApp />} />
+      {/* Browse-first ask gate and internal live chat */}
+      <Route path="/" element={<AskPage />} />
+      <Route path="/chat" element={<ChatApp />} />
 
       {/* Public documents library */}
       <Route path="/documents" element={<DocumentsPage />} />
@@ -56,6 +59,7 @@ export default function App() {
         <Route path="add-document" element={<AddDocumentPage />} />
         <Route path="chat-quality" element={<ChatQualityPage />} />
         <Route path="catalogue" element={<CatalogueAdminPage />} />
+        <Route path="access-codes" element={<AccessCodesPage />} />
       </Route>
     </Routes>
   )

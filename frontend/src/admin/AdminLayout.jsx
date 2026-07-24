@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, FileText, Search, MessageSquare,
-  Settings, Plus, LogOut, Loader2, BarChart2, Library,
+  Settings, Plus, LogOut, Loader2, BarChart2, Library, KeyRound,
 } from 'lucide-react'
 import { adminApi } from './api'
 import { cn } from '../lib/utils'
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/admin/qa',             label: 'Knowledge Q&A',   Icon: MessageSquare   },
   { to: '/admin/chat-quality',   label: 'Chat Quality',    Icon: BarChart2       },
   { to: '/admin/catalogue',      label: 'Q&A Catalogue',   Icon: Library         },
+  { to: '/admin/access-codes',   label: 'Access Codes',    Icon: KeyRound        },
   { to: '/admin/config',         label: 'Configuration',   Icon: Settings        },
   { to: '/admin/add-document',   label: 'Add Document',    Icon: Plus            },
 ]
