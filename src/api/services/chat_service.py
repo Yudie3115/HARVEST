@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from src.api.models.requests import ChatRequest
 from src.api.models.responses import ChatResponse, SourceRef
 from src.api.services.catalogue_service import enqueue_candidate_job
+from src.api.services.operational_metrics import CHAT_RETRIEVAL_METRIC, record_metric
 from src.config.settings import settings
 from src.llm.client import LLMClient, LLMContextTooLargeError
 from src.llm.embeddings import EmbeddingClient
@@ -24,7 +25,7 @@ _HISTORY_SEND_WINDOW = 6
 
 _NO_RESULTS_ANSWER = (
     "I couldn't find relevant information in the knowledge base for this question. "
-    "Try rephrasing, or ask about post-harvest storage, drying, pest control, or handling practices."
+    "Try rephrasing, or browse Documents and the Catalogue for reviewed guidance."
 )
 
 _CONTEXT_TOO_LARGE_ANSWER = (
@@ -39,6 +40,39 @@ def _history_content(msg: ChatMessage) -> str:
     if role == "assistant" and isinstance(english_content, str) and english_content:
         return english_content
     return msg.content
+
+
+def _top_score(search_results: list[dict]) -> float | None:
+    scores = [
+        float(hit["score"]) for hit in search_results if isinstance(hit.get("score"), (int, float))
+    ]
+    return max(scores) if scores else None
+
+
+def _retrieval_outcome(search_results: list[dict], chunks: list[dict]) -> tuple[str, float | None]:
+    top_score = _top_score(search_results)
+    if not chunks:
+        return "no_hits", top_score
+    threshold = settings.chat_min_top_score
+    if isinstance(threshold, (int, float)) and (top_score is None or top_score < threshold):
+        return "below_min_top_score", top_score
+    return "synthesized", top_score
+
+
+def _record_retrieval(db: Session, outcome: str, top_score: float | None) -> None:
+    """Commit immediately so this survives a downstream synthesis failure."""
+    record_metric(
+        db,
+        CHAT_RETRIEVAL_METRIC,
+        top_score if top_score is not None else 0.0,
+        component="chat",
+        unit="similarity",
+        metadata={
+            "outcome": outcome,
+            "gate_enabled": isinstance(settings.chat_min_top_score, (int, float)),
+        },
+    )
+    db.commit()
 
 
 def process_chat(
@@ -148,7 +182,9 @@ def process_chat(
     # ------------------------------------------------------------------
     # 5b. No-results shortcut — skip LLM if no relevant chunks found
     # ------------------------------------------------------------------
-    if not chunks:
+    retrieval_outcome, top_score = _retrieval_outcome(search_results, chunks)
+    _record_retrieval(db, retrieval_outcome, top_score)
+    if retrieval_outcome != "synthesized":
         user_msg = ChatMessage(
             session_id=session_uuid,
             role=MessageRoleEnum.user,
@@ -166,9 +202,13 @@ def process_chat(
         db.add(user_msg)
         db.add(assistant_msg)
         from sqlalchemy.sql import func as sqlfunc
+
         chat_session.last_active_at = sqlfunc.now()
         db.commit()
-        logger.info(f"No relevant chunks for session {request.session_id}")
+        logger.info(
+            f"Live synthesis skipped for session {request.session_id} "
+            f"(outcome={retrieval_outcome}, top_score={top_score})"
+        )
         return ChatResponse(
             answer=_NO_RESULTS_ANSWER,
             detected_language=detected_language,
@@ -271,6 +311,7 @@ def process_chat(
     )
 
     from sqlalchemy.sql import func as sqlfunc
+
     chat_session.last_active_at = sqlfunc.now()
     db.commit()
 
@@ -372,6 +413,9 @@ def process_chat_stream(
             if hit.get("payload", {}).get("text")
         ]
 
+        retrieval_outcome, top_score = _retrieval_outcome(search_results, chunks)
+        _record_retrieval(db, retrieval_outcome, top_score)
+
         # History turns — use English content for assistant messages to avoid
         # tokenization overhead from non-Latin scripts in history
         history_turns = [
@@ -383,18 +427,25 @@ def process_chat_stream(
         ] or None
 
         # No-results shortcut
-        if not chunks:
+        if retrieval_outcome != "synthesized":
             user_msg = ChatMessage(
-                session_id=session_uuid, role=MessageRoleEnum.user,
-                content=request.message, detected_language=detected_language, sources=None,
+                session_id=session_uuid,
+                role=MessageRoleEnum.user,
+                content=request.message,
+                detected_language=detected_language,
+                sources=None,
             )
             assistant_msg = ChatMessage(
-                session_id=session_uuid, role=MessageRoleEnum.assistant,
-                content=_NO_RESULTS_ANSWER, detected_language=detected_language, sources=[],
+                session_id=session_uuid,
+                role=MessageRoleEnum.assistant,
+                content=_NO_RESULTS_ANSWER,
+                detected_language=detected_language,
+                sources=[],
             )
             db.add(user_msg)
             db.add(assistant_msg)
             from sqlalchemy.sql import func as sqlfunc
+
             chat_session.last_active_at = sqlfunc.now()
             db.commit()
             yield f"data: {_json.dumps({'type': 'done', 'answer': _NO_RESULTS_ANSWER, 'sources': [], 'detected_language': detected_language, 'no_results': True, 'session_id': request.session_id})}\n\n"
@@ -443,14 +494,19 @@ def process_chat_stream(
 
         # Persist messages
         user_msg = ChatMessage(
-            session_id=session_uuid, role=MessageRoleEnum.user,
-            content=request.message, detected_language=detected_language, sources=None,
+            session_id=session_uuid,
+            role=MessageRoleEnum.user,
+            content=request.message,
+            detected_language=detected_language,
+            sources=None,
         )
         assistant_msg = ChatMessage(
-            session_id=session_uuid, role=MessageRoleEnum.assistant,
+            session_id=session_uuid,
+            role=MessageRoleEnum.assistant,
             content=final_answer,
             english_content=full_english_response if detected_language != "eng" else None,
-            detected_language=detected_language, sources=sources_dicts,
+            detected_language=detected_language,
+            sources=sources_dicts,
         )
         db.add(user_msg)
         db.add(assistant_msg)
@@ -461,6 +517,7 @@ def process_chat_stream(
             source_chunk_ids=[hit["id"] for hit in search_results],
         )
         from sqlalchemy.sql import func as sqlfunc
+
         chat_session.last_active_at = sqlfunc.now()
         db.commit()
 

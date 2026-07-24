@@ -21,6 +21,7 @@ def _make_message(role, content):
 
 def _make_request(session_id, message="What is post-harvest loss?"):
     from src.api.models.requests import ChatRequest
+
     return ChatRequest(session_id=str(session_id), message=message)
 
 
@@ -41,7 +42,9 @@ def mocks():
         _make_message("assistant", "Dry maize in the sun to below 13.5% moisture."),
         _make_message("user", "How do I dry maize?"),  # oldest
     ]
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = prior_messages
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        prior_messages
+    )
 
     llm = MagicMock()
     llm.answer_question.return_value = "Post-harvest loss is crop lost after harvest."
@@ -97,7 +100,10 @@ def test_history_passed_to_answer_question(mocks):
     assert history is not None, "history kwarg must be passed to answer_question"
     assert len(history) == 4
     assert history[0] == {"role": "user", "content": "How do I dry maize?"}
-    assert history[1] == {"role": "assistant", "content": "Dry maize in the sun to below 13.5% moisture."}
+    assert history[1] == {
+        "role": "assistant",
+        "content": "Dry maize in the sun to below 13.5% moisture.",
+    }
     assert history[2] == {"role": "user", "content": "How long does it take?"}
     assert history[3] == {"role": "assistant", "content": "Usually 3–5 days depending on weather."}
 
@@ -108,10 +114,16 @@ def test_history_capped_at_six_messages(mocks):
 
     # 8 prior messages in descending order (newest first, as returned by DB)
     many_messages = [
-        _make_message("user", f"question {i}") if i % 2 == 0 else _make_message("assistant", f"answer {i}")
+        _make_message("user", f"question {i}")
+        if i % 2 == 0
+        else _make_message("assistant", f"answer {i}")
         for i in range(7, -1, -1)
     ]
-    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = many_messages
+    mocks[
+        "db"
+    ].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        many_messages
+    )
 
     request = _make_request(mocks["session_id"])
 
@@ -134,7 +146,11 @@ def test_empty_history_when_no_prior_messages(mocks):
     """No prior messages → history should be None or empty (not crash)."""
     from src.api.services.chat_service import process_chat
 
-    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    mocks[
+        "db"
+    ].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        []
+    )
 
     request = _make_request(mocks["session_id"])
 
@@ -158,7 +174,11 @@ def test_score_threshold_passed_to_search(mocks):
     """The vector DB search must use settings.chat_score_threshold."""
     from src.api.services.chat_service import process_chat
 
-    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    mocks[
+        "db"
+    ].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        []
+    )
 
     request = _make_request(mocks["session_id"])
 
@@ -225,7 +245,11 @@ def test_sources_include_score_and_snippet(mocks):
     """Each returned SourceRef must include score and snippet from the search hit."""
     from src.api.services.chat_service import process_chat
 
-    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    mocks[
+        "db"
+    ].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        []
+    )
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
@@ -251,7 +275,11 @@ def test_no_results_skips_llm_and_sets_flag(mocks):
     from src.api.services.chat_service import process_chat
 
     mocks["vector_db"].search.return_value = []
-    mocks["db"].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    mocks[
+        "db"
+    ].query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        []
+    )
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
@@ -269,3 +297,147 @@ def test_no_results_skips_llm_and_sets_flag(mocks):
     mocks["llm"].answer_question.assert_not_called()
     assert result.no_results is True
     assert "couldn't find" in result.answer.lower()
+
+
+def test_min_top_score_blocks_nonstreaming_synthesis(mocks):
+    from src.api.services.chat_service import process_chat
+
+    mocks["vector_db"].search.return_value[0]["score"] = 0.49
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.3
+        mock_settings.chat_min_top_score = 0.5
+        result = process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    mocks["llm"].answer_question.assert_not_called()
+    assert result.no_results is True
+    metrics = [
+        call.args[0]
+        for call in mocks["db"].add.call_args_list
+        if getattr(call.args[0], "metric_name", None) == "chat_retrieval_top_score"
+    ]
+    assert metrics[0].metric_value == 0.49
+    assert metrics[0].extra_metadata["outcome"] == "below_min_top_score"
+
+
+def test_min_top_score_allows_nonstreaming_synthesis_above_threshold(mocks):
+    from src.api.services.chat_service import process_chat
+
+    mocks["vector_db"].search.return_value[0]["score"] = 0.6
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.3
+        mock_settings.chat_min_top_score = 0.5
+        result = process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    mocks["llm"].answer_question.assert_called_once()
+    assert result.no_results is False
+    metrics = [
+        call.args[0]
+        for call in mocks["db"].add.call_args_list
+        if getattr(call.args[0], "metric_name", None) == "chat_retrieval_top_score"
+    ]
+    assert metrics[0].metric_value == 0.6
+    assert metrics[0].extra_metadata["outcome"] == "synthesized"
+
+
+def test_disabled_min_top_score_observes_without_blocking(mocks):
+    from src.api.services.chat_service import process_chat
+
+    mocks["vector_db"].search.return_value[0]["score"] = 0.01
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.0
+        mock_settings.chat_min_top_score = None
+        result = process_chat(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+
+    mocks["llm"].answer_question.assert_called_once()
+    assert result.no_results is False
+
+
+def test_min_top_score_blocks_stream_before_tokens(mocks):
+    import json
+
+    from src.api.services.chat_service import process_chat_stream
+
+    mocks["vector_db"].search.return_value[0]["score"] = 0.4
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.3
+        mock_settings.chat_min_top_score = 0.5
+        events = list(
+            process_chat_stream(
+                request=request,
+                db=mocks["db"],
+                llm_client=mocks["llm"],
+                embedding_client=mocks["embedding"],
+                vector_db_client=mocks["vector_db"],
+                translation_client=mocks["translation"],
+            )
+        )
+
+    mocks["llm"].stream_answer.assert_not_called()
+    payload = json.loads(events[-1].removeprefix("data: "))
+    assert payload["type"] == "done"
+    assert payload["no_results"] is True
+
+
+def test_min_top_score_allows_stream_synthesis_above_threshold(mocks):
+    import json
+
+    from src.api.services.chat_service import process_chat_stream
+
+    mocks["vector_db"].search.return_value[0]["score"] = 0.6
+    mocks["llm"].stream_answer.return_value = ["Post", "-harvest loss."]
+    request = _make_request(mocks["session_id"])
+
+    with patch("src.api.services.chat_service.settings") as mock_settings:
+        mock_settings.chat_score_threshold = 0.3
+        mock_settings.chat_min_top_score = 0.5
+        events = list(
+            process_chat_stream(
+                request=request,
+                db=mocks["db"],
+                llm_client=mocks["llm"],
+                embedding_client=mocks["embedding"],
+                vector_db_client=mocks["vector_db"],
+                translation_client=mocks["translation"],
+            )
+        )
+
+    mocks["llm"].stream_answer.assert_called_once()
+    payload = json.loads(events[-1].removeprefix("data: "))
+    assert payload["type"] == "done"
+    assert payload["no_results"] is False
+    metrics = [
+        call.args[0]
+        for call in mocks["db"].add.call_args_list
+        if getattr(call.args[0], "metric_name", None) == "chat_retrieval_top_score"
+    ]
+    assert metrics[0].metric_value == 0.6
+    assert metrics[0].extra_metadata["outcome"] == "synthesized"
