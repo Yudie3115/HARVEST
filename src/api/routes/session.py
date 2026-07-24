@@ -8,11 +8,18 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db, get_web_grant
-from src.api.models.requests import NewSessionRequest
+from src.api.models.requests import CatalogueSessionRequest, NewSessionRequest
 from src.api.models.responses import HistoryMessage, SessionHistoryResponse, SessionResponse, SourceRef
 from src.api.services import access_service
 from src.api.services.access_service import ResolvedGrant, SessionForbiddenError
-from src.storage.models import ChannelEnum, ChatMessage, ChatSession
+from src.storage.models import (
+    CatalogueEntry,
+    CatalogueStatusEnum,
+    ChannelEnum,
+    ChatMessage,
+    ChatSession,
+    MessageRoleEnum,
+)
 
 router = APIRouter(tags=["session"])
 
@@ -52,6 +59,61 @@ async def create_session(
         session_id=str(chat_session.id),
         channel=chat_session.channel.value,
     )
+
+
+@router.post("/from-catalogue", response_model=SessionResponse, status_code=201)
+async def create_session_from_catalogue(
+    body: CatalogueSessionRequest,
+    db: Session = Depends(get_db),
+    resolved: ResolvedGrant = Depends(get_web_grant),
+) -> SessionResponse:
+    """Create a grant-owned web session seeded with one approved catalogue Q&A."""
+    access_service.require_active_code(resolved.access_code)
+    try:
+        entry_id = UUID(body.catalogue_entry_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid catalogue_entry_id format.")
+
+    entry = db.get(CatalogueEntry, entry_id)
+    if entry is None or entry.status != CatalogueStatusEnum.approved:
+        raise HTTPException(status_code=404, detail="Catalogue entry not found.")
+
+    import uuid
+
+    chat_session = ChatSession(
+        channel=ChannelEnum.web,
+        identifier=str(uuid.uuid4()),
+        access_grant_id=resolved.grant.id,
+    )
+    db.add(chat_session)
+    db.flush()
+    db.add_all(
+        [
+            ChatMessage(
+                session_id=chat_session.id,
+                role=MessageRoleEnum.user,
+                content=entry.question_en,
+                detected_language="eng",
+            ),
+            ChatMessage(
+                session_id=chat_session.id,
+                role=MessageRoleEnum.assistant,
+                content=entry.answer_en,
+                detected_language="eng",
+                sources=_catalogue_sources(db, entry),
+            ),
+        ]
+    )
+    db.commit()
+    db.refresh(chat_session)
+    return SessionResponse(session_id=str(chat_session.id), channel=chat_session.channel.value)
+
+
+def _catalogue_sources(db: Session, entry: CatalogueEntry) -> list[dict]:
+    if entry.source_message_id is None:
+        return []
+    source_message = db.get(ChatMessage, entry.source_message_id)
+    return list(source_message.sources or []) if source_message else []
 
 
 @router.get("/{session_id}/history", response_model=SessionHistoryResponse)

@@ -2,7 +2,6 @@
 import uuid
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -54,6 +53,68 @@ class TestCreateSession:
         assert resp.status_code == 201
         added = db.add.call_args[0][0]
         assert added.access_grant_id == resolved.grant.id
+
+
+class TestCreateSessionFromCatalogue:
+    def test_requires_access_grant(self):
+        _, client, _ = _make_client()
+        resp = client.post(
+            "/session/from-catalogue",
+            json={"catalogue_entry_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 401
+
+    def test_rejects_nonapproved_entry_with_uniform_404(self):
+        from src.storage.models import CatalogueEntry, CatalogueStatusEnum
+
+        app, client, db = _make_client()
+        _override_grant(app, _fake_resolved())
+        entry = CatalogueEntry(
+            id=uuid.uuid4(),
+            question_en="Question",
+            answer_en="Answer",
+            status=CatalogueStatusEnum.retracted,
+        )
+        db.get.return_value = entry
+
+        resp = client.post(
+            "/session/from-catalogue",
+            json={"catalogue_entry_id": str(entry.id)},
+        )
+        assert resp.status_code == 404
+
+    def test_seeds_approved_question_and_answer_without_reserving_quota(self):
+        from src.storage.models import CatalogueEntry, CatalogueStatusEnum, ChatSession
+
+        app, client, db = _make_client()
+        resolved = _fake_resolved()
+        _override_grant(app, resolved)
+        entry = CatalogueEntry(
+            id=uuid.uuid4(),
+            question_en="How should maize be dried?",
+            answer_en="Dry it before storage.",
+            status=CatalogueStatusEnum.approved,
+            source_message_id=None,
+        )
+        db.get.return_value = entry
+
+        def assign_id(row):
+            if isinstance(row, ChatSession):
+                row.id = uuid.uuid4()
+
+        db.add.side_effect = assign_id
+        resp = client.post(
+            "/session/from-catalogue",
+            json={"catalogue_entry_id": str(entry.id)},
+        )
+
+        assert resp.status_code == 201
+        seeded = db.add_all.call_args[0][0]
+        assert [message.content for message in seeded] == [
+            entry.question_en,
+            entry.answer_en,
+        ]
+        assert all(message.session_id == seeded[0].session_id for message in seeded)
 
 
 class TestSessionHistory:

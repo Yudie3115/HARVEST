@@ -10,6 +10,10 @@ class NewSessionRequest(BaseModel):
     channel: str = "web"  # "web" or "whatsapp"
 
 
+class CatalogueSessionRequest(BaseModel):
+    catalogue_entry_id: str
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
