@@ -11,9 +11,23 @@ from src.api.services.catalogue_service import (
     enqueue_publication_job,
     enqueue_retraction_job,
 )
+from src.api.services.operational_metrics import (
+    CATALOGUE_REVIEW_METRIC,
+    build_calibration_report,
+    record_metric,
+)
 from src.storage.models import CatalogueEntry, CatalogueStatusEnum, ChatMessage
 
 router = APIRouter(prefix="/admin/catalogue", tags=["admin-catalogue"])
+
+
+@router.get("/calibration")
+def calibration(
+    days: int = Query(default=30, ge=1, le=365),
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    return build_calibration_report(db, days=days)
 
 
 def _serialize(db: Session, entry: CatalogueEntry) -> dict:
@@ -112,6 +126,17 @@ def approve(
     ):
         raise HTTPException(status_code=409, detail="Entry is not awaiting publication.")
     job = enqueue_publication_job(db, entry.id)
+    record_metric(
+        db,
+        CATALOGUE_REVIEW_METRIC,
+        1,
+        component="catalogue_review",
+        metadata={
+            "outcome": "approved",
+            "grounding_score": entry.grounding_score,
+            "llm_score": entry.llm_score,
+        },
+    )
     db.commit()
     return {"id": str(entry.id), "job_id": str(job.id), "status": "queued"}
 
@@ -129,6 +154,17 @@ def reject(
     ):
         raise HTTPException(status_code=409, detail="Entry cannot be rejected.")
     entry.status = CatalogueStatusEnum.rejected
+    record_metric(
+        db,
+        CATALOGUE_REVIEW_METRIC,
+        0,
+        component="catalogue_review",
+        metadata={
+            "outcome": "rejected",
+            "grounding_score": entry.grounding_score,
+            "llm_score": entry.llm_score,
+        },
+    )
     db.commit()
     return _serialize(db, entry)
 

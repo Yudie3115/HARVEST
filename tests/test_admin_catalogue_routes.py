@@ -1,9 +1,8 @@
 """Tests for admin catalogue review/publication status-transition guards."""
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -64,6 +63,20 @@ class TestRequiresAdmin:
 
         resp = client.post(f"/admin/catalogue/{uuid.uuid4()}/approve")
         assert resp.status_code in (401, 403)
+
+
+class TestCalibration:
+    def test_returns_admin_only_evidence_report(self):
+        client, db = _make_client()
+        with patch(
+            "src.api.routes.admin_catalogue.build_calibration_report",
+            return_value={"window": {"days": 14}},
+        ) as build:
+            resp = client.get("/admin/catalogue/calibration?days=14")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"window": {"days": 14}}
+        build.assert_called_once_with(db, days=14)
 
 
 class TestApprove:

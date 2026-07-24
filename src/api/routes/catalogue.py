@@ -14,6 +14,11 @@ from src.api.dependencies import (
     get_translation_client,
 )
 from src.config.settings import settings
+from src.api.services.operational_metrics import (
+    CATALOGUE_FEEDBACK_METRIC,
+    CATALOGUE_MATCH_METRIC,
+    record_metric,
+)
 from src.storage.models import CatalogueEntry, CatalogueStatusEnum, ChatMessage
 
 router = APIRouter(prefix="/catalogue", tags=["catalogue"])
@@ -53,21 +58,14 @@ def list_catalogue(
     limit: int = Query(default=20, ge=1, le=50),
     db: Session = Depends(get_db),
 ) -> dict:
-    query = db.query(CatalogueEntry).filter(
-        CatalogueEntry.status == CatalogueStatusEnum.approved
-    )
+    query = db.query(CatalogueEntry).filter(CatalogueEntry.status == CatalogueStatusEnum.approved)
     if q:
         like = f"%{q}%"
         query = query.filter(
             or_(CatalogueEntry.question_en.ilike(like), CatalogueEntry.answer_en.ilike(like))
         )
     total = query.count()
-    entries = (
-        query.order_by(CatalogueEntry.approved_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    entries = query.order_by(CatalogueEntry.approved_at.desc()).offset(offset).limit(limit).all()
     return {
         "items": [_public_entry(db, entry) for entry in entries],
         "total": total,
@@ -109,9 +107,12 @@ def match_catalogue(
     hits = vectors.search(
         embeddings.embed(question_en),
         top_k=3,
-        score_threshold=settings.catalogue_match_threshold,
+        score_threshold=settings.catalogue_match_observation_threshold,
     )
     for hit in hits:
+        score = hit.get("score")
+        if not isinstance(score, (int, float)) or score < settings.catalogue_match_threshold:
+            continue
         try:
             entry_id = UUID(hit.get("payload", {}).get("catalogue_entry_id") or hit["id"])
         except (KeyError, TypeError, ValueError):
@@ -120,10 +121,30 @@ def match_catalogue(
         if entry is None or entry.status != CatalogueStatusEnum.approved:
             continue
         entry.served_count += 1
+        record_metric(
+            db,
+            CATALOGUE_MATCH_METRIC,
+            score if isinstance(score, (int, float)) else 0,
+            component="catalogue",
+            unit="similarity",
+            metadata={"matched": True, "language": language},
+        )
         db.commit()
         result = _public_entry(db, entry, language)
-        result["score"] = hit.get("score")
+        result["score"] = score
         return {"matched": True, "entry": result}
+    candidate_scores = [
+        float(hit["score"]) for hit in hits if isinstance(hit.get("score"), (int, float))
+    ]
+    record_metric(
+        db,
+        CATALOGUE_MATCH_METRIC,
+        max(candidate_scores, default=0),
+        component="catalogue",
+        unit="similarity",
+        metadata={"matched": False, "language": language},
+    )
+    db.commit()
     return {"matched": False, "entry": None}
 
 
@@ -138,5 +159,34 @@ def mark_helpful(
     if entry is None or entry.status != CatalogueStatusEnum.approved:
         raise _not_found()
     entry.helpful_count += 1
+    record_metric(
+        db,
+        CATALOGUE_FEEDBACK_METRIC,
+        1,
+        component="catalogue",
+        metadata={"outcome": "helpful"},
+    )
     db.commit()
     return {"id": str(entry.id), "helpful_count": entry.helpful_count}
+
+
+@router.post("/{entry_id}/rejected-match")
+@limiter.limit(settings.catalogue_helpful_rate_limit)
+def mark_rejected_match(
+    request: Request,
+    entry_id: UUID,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Record that a surfaced semantic match did not answer the user's question."""
+    entry = db.get(CatalogueEntry, entry_id)
+    if entry is None or entry.status != CatalogueStatusEnum.approved:
+        raise _not_found()
+    record_metric(
+        db,
+        CATALOGUE_FEEDBACK_METRIC,
+        0,
+        component="catalogue",
+        metadata={"outcome": "rejected_match"},
+    )
+    db.commit()
+    return {"id": str(entry.id), "recorded": True}
