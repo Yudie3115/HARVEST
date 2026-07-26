@@ -169,3 +169,21 @@ class TestSessionHistory:
         assert len(order) == 3
         assert "CASE" in str(order[1])
         assert "chat_messages.role" in str(order[1])
+
+    def test_exhausted_active_code_can_still_read_own_history(self):
+        app, client, db = _make_client()
+        resolved = _fake_resolved()
+        resolved.access_code.usage_count = 1
+        resolved.access_code.monthly_limit = 1
+        _override_grant(app, resolved)
+
+        owned_session = MagicMock()
+        owned_session.access_grant_id = resolved.grant.id
+        db.get.return_value = owned_session
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+            []
+        )
+
+        resp = client.get(f"/session/{uuid.uuid4()}/history")
+
+        assert resp.status_code == 200

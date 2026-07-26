@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, KeyRound, Loader2, LockKeyhole } from 'lucide-react'
 import { useAccess } from './AccessContext'
 
-function formatReset(value) {
+export function formatReset(value) {
   if (!value) return 'the next monthly reset'
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'long',

@@ -1,7 +1,13 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 
-export default function ChatWindow({ messages, isLoading, onShowSources, onAskQuestion }) {
+export default function ChatWindow({
+  messages,
+  isLoading,
+  onShowSources,
+  onAskQuestion,
+  interactionsDisabled = isLoading,
+}) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -32,7 +38,7 @@ export default function ChatWindow({ messages, isLoading, onShowSources, onAskQu
             message={msg}
             onShowSources={onShowSources}
             onAskQuestion={onAskQuestion}
-            interactionsDisabled={isLoading}
+            interactionsDisabled={interactionsDisabled}
           />
         ))}
         <div ref={bottomRef} style={{ height: 4 }} />

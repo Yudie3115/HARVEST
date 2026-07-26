@@ -17,7 +17,14 @@ const WELCOME = {
 
 export function useChat(
   sessionId,
-  { token, initialQuestion, onInitialQuestionConsumed, onSessionExpired, onAccessError } = {},
+  {
+    token,
+    initialQuestion,
+    sendingEnabled = true,
+    onInitialQuestionConsumed,
+    onSessionExpired,
+    onAccessError,
+  } = {},
 ) {
   const [messages, setMessages] = useState([WELCOME])
   const [isLoading, setIsLoading] = useState(false)
@@ -97,7 +104,7 @@ export function useChat(
 
   const send = useCallback(
     async (text) => {
-      if (!sessionId || !text.trim() || isLoading) return
+      if (!sendingEnabled || !sessionId || !text.trim() || isLoading) return
 
       const userMsg = {
         id: `u-${Date.now()}`,
@@ -221,6 +228,7 @@ export function useChat(
     },
     [
       sessionId,
+      sendingEnabled,
       isLoading,
       languageOverride,
       modelPreference,
@@ -231,11 +239,12 @@ export function useChat(
   )
 
   useEffect(() => {
-    if (!sessionId || !initialQuestion || isLoading || !historyReady) return
+    if (!sendingEnabled || !sessionId || !initialQuestion || isLoading || !historyReady) return
     onInitialQuestionConsumed?.()
     send(initialQuestion)
   }, [
     sessionId,
+    sendingEnabled,
     initialQuestion,
     isLoading,
     historyReady,

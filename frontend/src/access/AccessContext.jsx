@@ -119,6 +119,8 @@ export function AccessProvider({ children }) {
     removeAccess,
     reportAccessError,
     canChat: state === 'active',
+    canViewChat: Boolean(token)
+      && ['active', 'exhausted', 'global_unavailable'].includes(state),
   }), [token, state, details, error, redeem, validate, removeAccess, reportAccessError])
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>
