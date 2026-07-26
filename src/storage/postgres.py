@@ -155,6 +155,32 @@ class PostgresClient:
             return session.query(Document).filter(
                 Document.id == document_id
             ).first()
+
+    def get_document_by_url(self, url: str) -> Optional[Document]:
+        """Return an existing document with the exact source URL."""
+        with self.get_session() as session:
+            return session.query(Document).filter(Document.url == url).first()
+
+    def get_document_by_file_hash(self, file_hash: str) -> Optional[Document]:
+        """Return an existing document with identical stored source bytes."""
+        with self.get_session() as session:
+            return (
+                session.query(Document)
+                .filter(Document.file_hash == file_hash)
+                .order_by(Document.discovered_at.asc())
+                .first()
+            )
+
+    def delete_unprocessed_document(self, document_id: UUID) -> None:
+        """Remove a document row created by ingestion before indexing began."""
+        with self.get_session() as session:
+            session.query(ProcessingQueue).filter(
+                ProcessingQueue.document_id == document_id
+            ).delete(synchronize_session=False)
+            session.query(Document).filter(Document.id == document_id).delete(
+                synchronize_session=False
+            )
+            session.commit()
     
     def get_documents(
         self,

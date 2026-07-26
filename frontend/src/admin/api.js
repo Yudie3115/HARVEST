@@ -79,6 +79,9 @@ export const adminApi = {
   updateDocumentTitle: (id, title) =>
     request('PATCH', `/admin/documents/${id}/title`, { title }),
 
+  deleteDocument: (id) =>
+    request('DELETE', `/admin/documents/${id}`),
+
   getHealth: () => request('GET', '/admin/health'),
 
   getConfig: () => request('GET', '/admin/config'),

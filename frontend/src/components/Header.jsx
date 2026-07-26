@@ -77,6 +77,9 @@ export default function Header() {
         <NavLink to="/catalogue" style={navLinkStyle}>
           Catalogue
         </NavLink>
+        <NavLink to="/chat" style={navLinkStyle}>
+          History
+        </NavLink>
       </nav>
     </header>
   )

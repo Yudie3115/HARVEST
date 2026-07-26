@@ -5,6 +5,7 @@ Endpoints:
   POST /admin/login                  → exchange credentials for JWT
   GET  /admin/stats                  → doc counts + crawl activity
   GET  /admin/documents              → paginated document list
+  DELETE /admin/documents/{id}       → remove a document and its indexed chunks
   PATCH /admin/documents/{id}/publication → publish/unpublish a document
   PATCH /admin/documents/{id}/title  → rename a document
   GET  /admin/health                 → service connection status
@@ -32,13 +33,28 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.api.dependencies import get_db, get_vector_db_client
 from src.api.models.requests import DocumentTitleUpdateRequest, PublicationUpdateRequest
-from src.api.models.responses import DocumentTitleUpdateResponse, PublicationUpdateResponse
+from src.api.models.responses import (
+    DocumentDeleteResponse,
+    DocumentTitleUpdateResponse,
+    PublicationUpdateResponse,
+)
 from src.config.settings import settings
-from src.storage.models import Document, DocumentStatus
+from src.storage.models import (
+    ContentChunk,
+    Document,
+    DocumentClassification,
+    DocumentStatus,
+    ProcessingQueue,
+)
 
 _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_HOURS = 8
 _MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
+_DELETABLE_DOCUMENT_STATUSES = {
+    DocumentStatus.PROCESSED,
+    DocumentStatus.FAILED,
+    DocumentStatus.SKIPPED,
+}
 
 security = HTTPBearer()
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -308,6 +324,68 @@ def update_document_title(
     db.refresh(doc)
 
     return DocumentTitleUpdateResponse(id=str(doc.id), title=doc.title)
+
+
+@router.delete("/documents/{document_id}", response_model=DocumentDeleteResponse)
+def delete_document(
+    document_id: UUID,
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+    vector_db=Depends(get_vector_db_client),
+) -> DocumentDeleteResponse:
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if doc.status not in _DELETABLE_DOCUMENT_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="This document is still being ingested and cannot be deleted yet.",
+        )
+
+    try:
+        vector_db.delete_by_document(str(document_id))
+    except Exception as exc:
+        logger.exception(f"Could not delete vectors for document {document_id}: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not remove this document from vector search. No database records were deleted.",
+        ) from exc
+
+    file_path = doc.file_path
+    try:
+        db.query(ProcessingQueue).filter(
+            ProcessingQueue.document_id == document_id
+        ).delete(synchronize_session=False)
+        db.query(DocumentClassification).filter(
+            DocumentClassification.document_id == document_id
+        ).delete(synchronize_session=False)
+        db.query(ContentChunk).filter(ContentChunk.document_id == document_id).delete(
+            synchronize_session=False
+        )
+        db.delete(doc)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(f"Could not delete database rows for document {document_id}")
+        raise
+
+    source_file_deleted = not bool(file_path)
+    if file_path:
+        try:
+            from src.storage.minio_client import MinIOClient
+
+            MinIOClient().delete_object(file_path)
+            source_file_deleted = True
+        except Exception as exc:
+            logger.warning(
+                f"Document {document_id} was deleted but source object {file_path} "
+                f"could not be removed: {exc}"
+            )
+
+    return DocumentDeleteResponse(
+        id=str(document_id),
+        source_file_deleted=source_file_deleted,
+    )
 
 
 # ---------------------------------------------------------------------------

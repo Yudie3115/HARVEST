@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock3, ExternalLink, Pencil } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock3, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { adminApi } from '../api'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -88,11 +88,13 @@ export default function Documents() {
   const [publishingId, setPublishingId] = useState(null)
   const [publishErrors, setPublishErrors] = useState({})
   const [sourceUrlInputs, setSourceUrlInputs] = useState({})
-  const [confirming, setConfirming] = useState(null) // { id, action: 'publish' | 'unpublish' } | null
+  const [confirming, setConfirming] = useState(null) // { id, action: 'publish' | 'unpublish' | 'delete' } | null
   const [editingTitleId, setEditingTitleId] = useState(null)
   const [titleDrafts, setTitleDrafts] = useState({})
   const [savingTitleId, setSavingTitleId] = useState(null)
   const [titleErrors, setTitleErrors] = useState({})
+  const [deletingId, setDeletingId] = useState(null)
+  const [deleteErrors, setDeleteErrors] = useState({})
 
   useEffect(() => {
     load(0)
@@ -188,6 +190,11 @@ export default function Documents() {
     setConfirming({ id: doc.id, action: 'unpublish' })
   }
 
+  function requestDelete(doc) {
+    setDeleteErrors(prev => ({ ...prev, [doc.id]: null }))
+    setConfirming({ id: doc.id, action: 'delete' })
+  }
+
   function cancelConfirm() {
     setConfirming(null)
   }
@@ -195,6 +202,23 @@ export default function Documents() {
   async function confirmAction(doc) {
     const action = confirming?.action
     setConfirming(null)
+    if (action === 'delete') {
+      setDeletingId(doc.id)
+      setDeleteErrors(prev => ({ ...prev, [doc.id]: null }))
+      try {
+        await adminApi.deleteDocument(doc.id)
+        const nextOffset = docs.length === 1 && offset > 0
+          ? Math.max(0, offset - PAGE_SIZE)
+          : offset
+        await load(nextOffset)
+      } catch (e) {
+        setDeleteErrors(prev => ({ ...prev, [doc.id]: e.message }))
+      } finally {
+        setDeletingId(null)
+      }
+      return
+    }
+
     setPublishingId(doc.id)
     setPublishErrors(prev => ({ ...prev, [doc.id]: null }))
     try {
@@ -460,17 +484,26 @@ export default function Documents() {
                                       excerpts (never the full document) will become publicly visible
                                       immediately.
                                     </>
-                                  ) : (
+                                  ) : confirming.action === 'unpublish' ? (
                                     <>Unpublish this document? It will immediately stop appearing in the public library.</>
+                                  ) : (
+                                    <>
+                                      Permanently delete this document? Its source file, indexed chunks, and
+                                      search vectors will be removed from the knowledge base. This cannot be undone.
+                                    </>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Button
                                     size="sm"
-                                    variant={confirming.action === 'unpublish' ? 'destructive' : 'default'}
+                                    variant={confirming.action === 'publish' ? 'default' : 'destructive'}
                                     onClick={() => confirmAction(doc)}
                                   >
-                                    {confirming.action === 'publish' ? 'Yes, publish' : 'Yes, unpublish'}
+                                    {confirming.action === 'publish'
+                                      ? 'Yes, publish'
+                                      : confirming.action === 'unpublish'
+                                        ? 'Yes, unpublish'
+                                        : 'Yes, delete permanently'}
                                   </Button>
                                   <Button variant="outline" size="sm" onClick={cancelConfirm}>
                                     Cancel
@@ -502,8 +535,20 @@ export default function Documents() {
                                     Only processed documents can be published.
                                   </span>
                                 )}
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={deletingId === doc.id || ['queued', 'processing', 'discovered'].includes(doc.status)}
+                                  onClick={() => requestDelete(doc)}
+                                >
+                                  <Trash2 size={12} />
+                                  {deletingId === doc.id ? 'Deleting…' : 'Delete'}
+                                </Button>
                                 {publishErrors[doc.id] && (
                                   <span className="text-red-400">{publishErrors[doc.id]}</span>
+                                )}
+                                {deleteErrors[doc.id] && (
+                                  <span className="text-red-400">{deleteErrors[doc.id]}</span>
                                 )}
                               </div>
                             )}

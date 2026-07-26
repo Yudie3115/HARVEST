@@ -24,6 +24,7 @@ export function useChat(
     onInitialQuestionConsumed,
     onSessionExpired,
     onAccessError,
+    onThreadUpdated,
   } = {},
 ) {
   const [messages, setMessages] = useState([WELCOME])
@@ -72,6 +73,7 @@ export function useChat(
     }
     let cancelled = false
     setHistoryReady(false)
+    setMessages([WELCOME])
     getHistory(sessionId, token)
       .then((data) => {
         if (cancelled) return
@@ -170,6 +172,7 @@ export function useChat(
               )
             )
             setIsLoading(false)
+            onThreadUpdated?.()
           },
           onError: (message, error) => {
             if (error?.code) onAccessError?.(error)
@@ -234,6 +237,7 @@ export function useChat(
       modelPreference,
       onSessionExpired,
       onAccessError,
+      onThreadUpdated,
       token,
     ]
   )
@@ -261,6 +265,7 @@ export function useChat(
     modelPreference,
     setModelPreference,
     modelOptions,
+    historyReady,
     send,
   }
 }

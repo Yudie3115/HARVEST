@@ -66,6 +66,14 @@ export async function getHistory(sessionId, token = null) {
   return res.json()
 }
 
+export async function getThreads(token) {
+  const res = await fetch(`${BASE_URL}/session/threads`, {
+    headers: protectedHeaders(token),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to load chat history')
+  return res.json()
+}
+
 export async function getFacets() {
   const res = await fetch(`${BASE_URL}/library/facets`)
   if (!res.ok) throw new Error(`Failed to load facets: ${res.status}`)

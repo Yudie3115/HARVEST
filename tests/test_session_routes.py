@@ -1,5 +1,6 @@
 """Tests for access gating on /session/new and /session/{id}/history."""
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from fastapi import FastAPI
@@ -116,6 +117,59 @@ class TestCreateSessionFromCatalogue:
             entry.answer_en,
         ]
         assert all(message.session_id == seeded[0].session_id for message in seeded)
+
+
+class TestThreadHistory:
+    def test_missing_token_returns_401(self):
+        _, client, _ = _make_client()
+
+        resp = client.get("/session/threads")
+
+        assert resp.status_code == 401
+
+    def test_lists_owned_web_threads_with_first_question_as_title(self):
+        app, client, db = _make_client()
+        resolved = _fake_resolved()
+        _override_grant(app, resolved)
+        timestamp = datetime(2026, 7, 26, 10, 30, tzinfo=timezone.utc)
+        chat_session = MagicMock()
+        chat_session.id = uuid.uuid4()
+        chat_session.created_at = timestamp
+        chat_session.last_active_at = timestamp
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            (chat_session, "  How   should maize be dried?  ", 4)
+        ]
+
+        resp = client.get("/session/threads")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "items": [
+                {
+                    "session_id": str(chat_session.id),
+                    "title": "How should maize be dried?",
+                    "message_count": 4,
+                    "created_at": "2026-07-26T10:30:00Z",
+                    "updated_at": "2026-07-26T10:30:00Z",
+                }
+            ]
+        }
+        filters = db.query.return_value.filter.call_args.args
+        assert "chat_sessions.access_grant_id" in str(filters[0])
+        assert "chat_sessions.channel" in str(filters[1])
+        assert "EXISTS" in str(filters[2])
+
+    def test_no_saved_threads_returns_empty_list(self):
+        app, client, db = _make_client()
+        _override_grant(app, _fake_resolved())
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+            []
+        )
+
+        resp = client.get("/session/threads")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"items": []}
 
 
 class TestSessionHistory:

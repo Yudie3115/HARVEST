@@ -50,6 +50,20 @@ function ResultBanner({ result, onDismiss, label }) {
     )
   }
 
+  if (result.status === 'duplicate') {
+    return (
+      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-[12px] text-blue-300">
+        <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+        <div>
+          {label && <span className="font-medium">{label}: </span>}
+          Already in the knowledge base
+          {result.existing_title ? ` as “${result.existing_title}”` : ''}. Nothing was uploaded or indexed again.
+        </div>
+        {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-blue-500 hover:text-blue-300">×</button>}
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-start gap-2.5 bg-red-500/5 border border-red-500/20 rounded-md px-4 py-3 text-[12px] text-red-300">
       <XCircle size={14} className="flex-shrink-0 mt-0.5" />

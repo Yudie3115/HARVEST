@@ -1,6 +1,8 @@
 """
 API response models
 """
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -49,6 +51,18 @@ class HistoryMessage(BaseModel):
 class SessionHistoryResponse(BaseModel):
     session_id: str
     messages: list[HistoryMessage]
+
+
+class ThreadSummary(BaseModel):
+    session_id: str
+    title: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ThreadListResponse(BaseModel):
+    items: list[ThreadSummary]
 
 
 class AccessCodeAdminResponse(BaseModel):
@@ -102,3 +116,9 @@ class PublicationUpdateResponse(BaseModel):
 class DocumentTitleUpdateResponse(BaseModel):
     id: str
     title: str
+
+
+class DocumentDeleteResponse(BaseModel):
+    id: str
+    status: str = "deleted"
+    source_file_deleted: bool

@@ -60,10 +60,15 @@ export function useSession(token, preferredSessionId = null, { onAccessError } =
   }, [token, preferredSessionId, startNewSession, onAccessError])
 
   const resetSession = useCallback(() => {
-    localStorage.removeItem(SESSION_KEY)
-    setSessionId(null)
     return startNewSession()
   }, [startNewSession])
 
-  return { sessionId, loading, error, resetSession }
+  const selectSession = useCallback((nextSessionId) => {
+    if (!nextSessionId || nextSessionId === sessionId) return
+    localStorage.setItem(SESSION_KEY, nextSessionId)
+    setError(null)
+    setSessionId(nextSessionId)
+  }, [sessionId])
+
+  return { sessionId, loading, error, resetSession, selectSession }
 }

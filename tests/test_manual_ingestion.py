@@ -146,6 +146,8 @@ def ingestion_mocks():
 
     fake_db = MagicMock()
     fake_db.get_or_create_manual_crawl_run.return_value = fake_run
+    fake_db.get_document_by_url.return_value = None
+    fake_db.get_document_by_file_hash.return_value = None
     fake_db.create_document.return_value = fake_doc
     fake_db.create_classification.return_value = MagicMock()
 
@@ -171,6 +173,82 @@ def ingestion_mocks():
 
 
 class TestIngestManualDocument:
+    def test_duplicate_file_returns_existing_document_without_processing(
+        self, ingestion_mocks
+    ):
+        existing = MagicMock()
+        existing.id = uuid4()
+        existing.url = "upload://existing/guide.pdf"
+        existing.title = "Existing guide"
+        ingestion_mocks["db"].get_document_by_file_hash.return_value = existing
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"same bytes", filename="guide.pdf")
+
+        assert result == {
+            "document_id": str(existing.id),
+            "url": existing.url,
+            "status": "duplicate",
+            "chunks": 0,
+            "reason": "duplicate_content",
+            "existing_title": "Existing guide",
+        }
+        ingestion_mocks["db"].create_document.assert_not_called()
+        ingestion_mocks["minio"].upload_bytes.assert_not_called()
+        ingestion_mocks["extract"].assert_not_called()
+        ingestion_mocks["chunk"].assert_not_called()
+
+    def test_duplicate_url_returns_existing_document_without_downloading(
+        self, ingestion_mocks
+    ):
+        existing = MagicMock()
+        existing.id = uuid4()
+        existing.url = "https://example.org/guide.pdf"
+        existing.title = "Existing URL guide"
+        ingestion_mocks["db"].get_document_by_url.return_value = existing
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(url=existing.url)
+
+        assert result["status"] == "duplicate"
+        assert result["reason"] == "duplicate_url"
+        assert result["document_id"] == str(existing.id)
+        ingestion_mocks["download"].assert_not_called()
+        ingestion_mocks["db"].create_document.assert_not_called()
+
+    def test_url_with_duplicate_downloaded_content_cleans_up_new_record(
+        self, ingestion_mocks
+    ):
+        existing = MagicMock()
+        existing.id = uuid4()
+        existing.url = "https://other.example/existing.pdf"
+        existing.title = "Existing content"
+        ingestion_mocks["db"].get_document_by_file_hash.return_value = existing
+        ingestion_mocks["download"].return_value = {
+            "minio_path": f"{FAKE_DOC_ID}.pdf",
+            "file_hash": "a" * 64,
+            "file_size": 5000,
+            "mime_type": "application/pdf",
+            "doc_type": "pdf",
+            "content": b"same pdf bytes",
+        }
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(url="https://example.org/copy.pdf")
+
+        assert result["status"] == "duplicate"
+        assert result["reason"] == "duplicate_content"
+        ingestion_mocks["minio"].delete_object.assert_called_once_with(
+            f"{FAKE_DOC_ID}.pdf"
+        )
+        ingestion_mocks["db"].delete_unprocessed_document.assert_called_once_with(
+            UUID(FAKE_DOC_ID)
+        )
+        ingestion_mocks["extract"].assert_not_called()
+
     def test_file_bytes_produces_processed_result(self, ingestion_mocks):
         from src.flows.manual_ingestion import ingest_manual_document
 

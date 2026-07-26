@@ -48,7 +48,7 @@ def ingest_manual_document(
     chunks are written to the vector database.
 
     Returns a dict with keys:
-        status          "processed" | "skipped" | "failed"
+        status          "processed" | "duplicate" | "skipped" | "failed"
         document_id     UUID string of the Document row
         url             The URL or synthetic upload:// URI stored in the DB
         chunks          Number of chunks written (0 if skipped/failed)
@@ -61,6 +61,23 @@ def ingest_manual_document(
         raise ValueError("'filename' is required when supplying 'content'")
 
     db = PostgresClient()
+
+    file_hash = hash_content(content) if content is not None else None
+    existing = (
+        db.get_document_by_file_hash(file_hash)
+        if file_hash
+        else db.get_document_by_url(url)
+    )
+    if existing is not None:
+        return {
+            "document_id": str(existing.id),
+            "url": existing.url,
+            "status": "duplicate",
+            "chunks": 0,
+            "reason": "duplicate_content" if file_hash else "duplicate_url",
+            "existing_title": existing.title,
+        }
+
     minio = MinIOClient()
 
     # Sentinel crawl run — created once, reused forever
@@ -85,6 +102,7 @@ def ingest_manual_document(
         crawl_run_id=crawl_run.id,
         title=title or filename or url,
         document_type=doc_type,
+        file_hash=file_hash,
         metadata={"manual_upload": True, **(metadata or {})},
     )
     doc_id = str(doc.id)
@@ -95,7 +113,6 @@ def ingest_manual_document(
         ext = Path(filename).suffix or f".{doc_type}"
         object_name = f"{doc_id}{ext}"
         minio.upload_bytes(content, object_name=object_name, content_type=mime_type)
-        file_hash = hash_content(content)
 
         db.update_document_file_info(
             document_id=UUID(doc_id),
@@ -133,6 +150,19 @@ def ingest_manual_document(
                 "status": "failed",
                 "chunks": 0,
                 "reason": "download_failed",
+            }
+
+        existing = db.get_document_by_file_hash(download_result["file_hash"])
+        if existing is not None and str(existing.id) != doc_id:
+            minio.delete_object(download_result["minio_path"])
+            db.delete_unprocessed_document(UUID(doc_id))
+            return {
+                "document_id": str(existing.id),
+                "url": existing.url,
+                "status": "duplicate",
+                "chunks": 0,
+                "reason": "duplicate_content",
+                "existing_title": existing.title,
             }
 
         db.update_document_file_info(

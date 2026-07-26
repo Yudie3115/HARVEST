@@ -1,13 +1,15 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Header from './components/Header'
 import ChatWindow from './components/ChatWindow'
 import LanguageBar from './components/LanguageBar'
 import InputBar from './components/InputBar'
 import SourcesSidebar from './components/SourcesSidebar'
+import ThreadHistory from './components/ThreadHistory'
 import { useSession } from './hooks/useSession'
 import { useChat } from './hooks/useChat'
 import AccessGate, { formatReset } from './access/AccessGate'
 import { useAccess } from './access/AccessContext'
+import { getThreads } from './api'
 import { LIVE_HANDOFF_KEY, readStoredJson } from './ask/handoff'
 
 function ReadOnlyNotice({ state, periodResetsAt }) {
@@ -26,17 +28,45 @@ function ReadOnlyNotice({ state, periodResetsAt }) {
 
 export default function App() {
   const access = useAccess()
+  const [threads, setThreads] = useState([])
+  const [threadsLoading, setThreadsLoading] = useState(true)
+  const [threadsError, setThreadsError] = useState(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [startingNew, setStartingNew] = useState(false)
   const [handoff, setHandoff] = useState(() => readStoredJson(LIVE_HANDOFF_KEY))
   const clearHandoff = useCallback(() => {
     localStorage.removeItem(LIVE_HANDOFF_KEY)
     setHandoff(null)
   }, [])
-  const { sessionId, loading: sessionLoading, resetSession } = useSession(
+  const loadThreads = useCallback(async () => {
+    if (!access.token) {
+      setThreads([])
+      setThreadsLoading(false)
+      return
+    }
+    setThreadsLoading(true)
+    try {
+      const result = await getThreads(access.token)
+      setThreads(result.items || [])
+      setThreadsError(null)
+    } catch (error) {
+      setThreadsError(error.message)
+      if ([401, 403].includes(error.status)) access.reportAccessError(error)
+    } finally {
+      setThreadsLoading(false)
+    }
+  }, [access.token, access.reportAccessError])
+  const {
+    sessionId,
+    loading: sessionLoading,
+    resetSession,
+    selectSession,
+  } = useSession(
     access.token,
     handoff?.sessionId,
     { onAccessError: access.reportAccessError },
   )
-  const { messages, isLoading, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, modelOptions, send } =
+  const { messages, isLoading, historyReady, detectedLanguage, languageOverride, setLanguageOverride, modelPreference, setModelPreference, modelOptions, send } =
     useChat(sessionId, {
       token: access.token,
       initialQuestion: handoff?.question,
@@ -44,9 +74,44 @@ export default function App() {
       onInitialQuestionConsumed: clearHandoff,
       onSessionExpired: resetSession,
       onAccessError: access.reportAccessError,
+      onThreadUpdated: loadThreads,
     })
 
   const [activeSources, setActiveSources] = useState(null)
+  const chatBusy = isLoading || sessionLoading || !historyReady
+
+  useEffect(() => {
+    if (sessionId) loadThreads()
+  }, [sessionId, loadThreads])
+
+  const selectThread = useCallback((nextSessionId) => {
+    clearHandoff()
+    setActiveSources(null)
+    selectSession(nextSessionId)
+    setHistoryOpen(false)
+  }, [clearHandoff, selectSession])
+
+  const startNewChat = useCallback(async () => {
+    if (!access.canChat || chatBusy || startingNew) return
+    setStartingNew(true)
+    clearHandoff()
+    setActiveSources(null)
+    try {
+      await resetSession()
+      setHistoryOpen(false)
+    } catch (error) {
+      access.reportAccessError(error)
+    } finally {
+      setStartingNew(false)
+    }
+  }, [
+    access.canChat,
+    access.reportAccessError,
+    chatBusy,
+    clearHandoff,
+    resetSession,
+    startingNew,
+  ])
 
   return (
     <div
@@ -60,33 +125,48 @@ export default function App() {
     >
       <Header />
       {access.canViewChat ? (
-        <>
-          <ChatWindow
-            messages={messages}
-            isLoading={isLoading || sessionLoading}
-            onShowSources={setActiveSources}
-            onAskQuestion={send}
-            interactionsDisabled={isLoading || sessionLoading || !access.canChat}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <ThreadHistory
+            threads={threads}
+            currentSessionId={sessionId}
+            loading={threadsLoading}
+            error={threadsError}
+            open={historyOpen}
+            newChatDisabled={!access.canChat || chatBusy || startingNew}
+            threadSwitchDisabled={chatBusy}
+            onOpen={() => setHistoryOpen(true)}
+            onClose={() => setHistoryOpen(false)}
+            onSelect={selectThread}
+            onNewChat={startNewChat}
           />
-          {access.canChat ? (
-            <>
-              <LanguageBar
-                detectedLanguage={detectedLanguage}
-                languageOverride={languageOverride}
-                onOverride={setLanguageOverride}
-                modelPreference={modelPreference}
-                modelOptions={modelOptions}
-                onModelChange={setModelPreference}
-              />
-              <InputBar onSend={send} disabled={isLoading || sessionLoading || !sessionId} />
-            </>
-          ) : (
-            <ReadOnlyNotice
-              state={access.state}
-              periodResetsAt={access.details?.period_resets_at}
+          <section className="flex min-w-0 flex-1 flex-col">
+            <ChatWindow
+              messages={messages}
+              isLoading={chatBusy}
+              onShowSources={setActiveSources}
+              onAskQuestion={send}
+              interactionsDisabled={chatBusy || !access.canChat}
             />
-          )}
-        </>
+            {access.canChat ? (
+              <>
+                <LanguageBar
+                  detectedLanguage={detectedLanguage}
+                  languageOverride={languageOverride}
+                  onOverride={setLanguageOverride}
+                  modelPreference={modelPreference}
+                  modelOptions={modelOptions}
+                  onModelChange={setModelPreference}
+                />
+                <InputBar onSend={send} disabled={chatBusy || !sessionId} />
+              </>
+            ) : (
+              <ReadOnlyNotice
+                state={access.state}
+                periodResetsAt={access.details?.period_resets_at}
+              />
+            )}
+          </section>
+        </div>
       ) : (
         <main className="flex-1 overflow-y-auto px-4 py-10">
           <AccessGate compact onGranted={() => {}} />
