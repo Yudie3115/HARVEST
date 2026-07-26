@@ -21,6 +21,7 @@ def _make_client():
 
 def _override_grant(app, resolved):
     from src.api.dependencies import get_web_grant
+
     app.dependency_overrides[get_web_grant] = lambda: resolved
 
 
@@ -157,7 +158,14 @@ class TestSessionHistory:
         owned_session = MagicMock()
         owned_session.access_grant_id = resolved.grant.id
         db.get.return_value = owned_session
-        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+            []
+        )
 
         resp = client.get(f"/session/{uuid.uuid4()}/history")
         assert resp.status_code == 200
+
+        order = db.query.return_value.filter.return_value.order_by.call_args.args
+        assert len(order) == 3
+        assert "CASE" in str(order[1])
+        assert "chat_messages.role" in str(order[1])

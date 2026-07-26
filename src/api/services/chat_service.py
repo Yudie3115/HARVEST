@@ -2,19 +2,28 @@
 Core RAG chat service — orchestrates translation, embedding, retrieval, and LLM synthesis.
 """
 from typing import Generator, List
+from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.requests import ChatRequest
-from src.api.models.responses import ChatResponse, SourceRef
+from src.api.models.responses import ChatResponse, SourceRef, SuggestedQuestion
 from src.api.services.catalogue_service import enqueue_candidate_job
+from src.api.services.message_ordering import newest_first_message_order
 from src.api.services.operational_metrics import CHAT_RETRIEVAL_METRIC, record_metric
 from src.config.settings import settings
 from src.llm.client import LLMClient, LLMContextTooLargeError
 from src.llm.embeddings import EmbeddingClient
-from src.storage.models import ChatMessage, ChatSession, MessageRoleEnum
+from src.storage.models import (
+    CatalogueEntry,
+    CatalogueStatusEnum,
+    ChatMessage,
+    ChatSession,
+    Document,
+    MessageRoleEnum,
+)
 from src.storage.vector_db import VectorDBClient
 from src.translation.client import TranslationClient
 
@@ -75,6 +84,167 @@ def _record_retrieval(db: Session, outcome: str, top_score: float | None) -> Non
     db.commit()
 
 
+def _file_name(url: str | None) -> str | None:
+    if not url:
+        return None
+    name = unquote(urlparse(url).path.rsplit("/", 1)[-1])
+    return name or None
+
+
+def _build_sources(db: Session, search_results: list[dict]) -> list[SourceRef]:
+    """Group cited chunks into document-level research references."""
+    grouped: dict[str, SourceRef] = {}
+    for citation_index, hit in enumerate(search_results, 1):
+        payload = hit.get("payload", {})
+        document = None
+        document_id = payload.get("document_id")
+        if document_id:
+            try:
+                candidate = db.get(Document, UUID(str(document_id)))
+                if isinstance(candidate, Document):
+                    document = candidate
+            except (TypeError, ValueError):
+                pass
+
+        url = (
+            (document.public_source_url or document.url)
+            if document is not None
+            else payload.get("source_url")
+        )
+        key = str(document.id) if document is not None else str(document_id or url or hit.get("id"))
+        score = float(hit["score"]) if isinstance(hit.get("score"), (int, float)) else None
+        text = payload.get("text", "")
+
+        if key in grouped:
+            reference = grouped[key]
+            reference.citation_indices.append(citation_index)
+            if score is not None and (reference.score is None or score > reference.score):
+                reference.score = score
+            continue
+
+        classification = document.classification if document is not None else None
+        summary = (
+            classification.summary
+            if classification is not None and isinstance(classification.summary, str)
+            else None
+        )
+        topics = (
+            list(classification.topics or [])
+            if classification is not None
+            else list(payload.get("topics") or [])
+        )
+        title = document.title if document is not None else payload.get("title")
+        grouped[key] = SourceRef(
+            title=title or _file_name(url) or "Untitled research source",
+            url=url,
+            site_name=document.site_name if document is not None else payload.get("site_name"),
+            score=score,
+            snippet=text[:320] if text else None,
+            document_id=str(document.id)
+            if document is not None
+            else str(document_id or "") or None,
+            summary=summary,
+            document_type=(
+                classification.document_category
+                if classification is not None
+                else payload.get("document_type")
+            ),
+            topics=topics[:6],
+            citation_indices=[citation_index],
+            library_url=(
+                f"/documents/{document.id}"
+                if document is not None and document.publicly_visible
+                else None
+            ),
+        )
+    return list(grouped.values())
+
+
+def _catalogue_suggestions(
+    db: Session,
+    catalogue_vector_db_client: VectorDBClient | None,
+    query_vector: list[float],
+    language: str,
+) -> list[dict]:
+    if catalogue_vector_db_client is None:
+        return []
+    try:
+        hits = catalogue_vector_db_client.search(
+            query_vector=query_vector,
+            top_k=5,
+            score_threshold=settings.catalogue_match_observation_threshold,
+        )
+    except Exception as exc:
+        logger.warning(f"Related catalogue search failed: {type(exc).__name__}")
+        return []
+
+    suggestions: list[dict] = []
+    for hit in hits:
+        score = hit.get("score")
+        if not isinstance(score, (int, float)) or score < settings.catalogue_suggestion_threshold:
+            continue
+        try:
+            entry_id = UUID(hit.get("payload", {}).get("catalogue_entry_id") or hit["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        entry = db.get(CatalogueEntry, entry_id)
+        if not isinstance(entry, CatalogueEntry) or entry.status != CatalogueStatusEnum.approved:
+            continue
+        translated = (entry.question_translations or {}).get(language)
+        suggestions.append(
+            {
+                "text": translated or entry.question_en,
+                "kind": "catalogue",
+                "catalogue_entry_id": str(entry.id),
+            }
+        )
+        if len(suggestions) == 2:
+            break
+    return suggestions
+
+
+def _suggest_questions(
+    db: Session,
+    *,
+    llm_client: LLMClient,
+    translation_client: TranslationClient,
+    catalogue_vector_db_client: VectorDBClient | None,
+    query_vector: list[float],
+    question: str,
+    answer: str | None,
+    chunks: list[dict],
+    language: str,
+) -> list[SuggestedQuestion]:
+    suggestions = _catalogue_suggestions(db, catalogue_vector_db_client, query_vector, language)
+    generated: list[str] = []
+    if answer and chunks:
+        try:
+            result = llm_client.suggest_followup_questions(question, answer, chunks)
+            if isinstance(result, list):
+                generated = [str(value).strip() for value in result if str(value).strip()]
+        except Exception as exc:
+            logger.warning(f"Follow-up generation failed: {type(exc).__name__}")
+
+    if language != "eng":
+        translated: list[str] = []
+        for value in generated:
+            try:
+                translated.append(translation_client.translate_from_english(value, language))
+            except Exception:
+                translated.append(value)
+        generated = translated
+
+    seen = {item["text"].casefold() for item in suggestions}
+    for text in generated:
+        if text.casefold() in seen:
+            continue
+        suggestions.append({"text": text[:240], "kind": "generated"})
+        seen.add(text.casefold())
+        if len(suggestions) == 4:
+            break
+    return [SuggestedQuestion(**item) for item in suggestions]
+
+
 def process_chat(
     request: ChatRequest,
     db: Session,
@@ -82,6 +252,7 @@ def process_chat(
     embedding_client: EmbeddingClient,
     vector_db_client: VectorDBClient,
     translation_client: TranslationClient,
+    catalogue_vector_db_client: VectorDBClient | None = None,
 ) -> ChatResponse:
     """
     Orchestrate the full RAG pipeline for a single chat turn.
@@ -116,7 +287,7 @@ def process_chat(
     recent_messages: List[ChatMessage] = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_uuid)
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(*newest_first_message_order())
         .limit(_HISTORY_WINDOW)
         .all()
     )
@@ -185,6 +356,17 @@ def process_chat(
     retrieval_outcome, top_score = _retrieval_outcome(search_results, chunks)
     _record_retrieval(db, retrieval_outcome, top_score)
     if retrieval_outcome != "synthesized":
+        suggestions = _suggest_questions(
+            db,
+            llm_client=llm_client,
+            translation_client=translation_client,
+            catalogue_vector_db_client=catalogue_vector_db_client,
+            query_vector=query_vector,
+            question=english_message,
+            answer=None,
+            chunks=[],
+            language=detected_language,
+        )
         user_msg = ChatMessage(
             session_id=session_uuid,
             role=MessageRoleEnum.user,
@@ -198,6 +380,7 @@ def process_chat(
             content=_NO_RESULTS_ANSWER,
             detected_language=detected_language,
             sources=[],
+            suggested_questions=[item.model_dump() for item in suggestions],
         )
         db.add(user_msg)
         db.add(assistant_msg)
@@ -215,6 +398,7 @@ def process_chat(
             sources=[],
             session_id=request.session_id,
             no_results=True,
+            suggested_questions=suggestions,
         )
 
     # ------------------------------------------------------------------
@@ -258,27 +442,20 @@ def process_chat(
             final_answer = english_answer
 
     # ------------------------------------------------------------------
-    # 9. Build sources from chunk payloads
+    # 9. Build document-level sources and useful next questions
     # ------------------------------------------------------------------
-    sources: List[SourceRef] = []
-    seen_urls: set[str] = set()
-    for hit in search_results:
-        payload = hit.get("payload", {})
-        url = payload.get("source_url")
-        if url and url in seen_urls:
-            continue
-        if url:
-            seen_urls.add(url)
-        text = payload.get("text", "")
-        sources.append(
-            SourceRef(
-                title=payload.get("title"),
-                url=url,
-                site_name=payload.get("site_name"),
-                score=hit.get("score"),
-                snippet=text[:200] if text else None,
-            )
-        )
+    sources = _build_sources(db, search_results)
+    suggestions = _suggest_questions(
+        db,
+        llm_client=llm_client,
+        translation_client=translation_client,
+        catalogue_vector_db_client=catalogue_vector_db_client,
+        query_vector=query_vector,
+        question=english_message,
+        answer=english_answer,
+        chunks=chunks,
+        language=detected_language,
+    )
 
     sources_dicts = [s.model_dump() for s in sources]
 
@@ -301,6 +478,7 @@ def process_chat(
         english_content=english_answer if detected_language != "eng" else None,
         detected_language=detected_language,
         sources=sources_dicts,
+        suggested_questions=[item.model_dump() for item in suggestions],
     )
     db.add(assistant_msg)
     db.flush()
@@ -326,6 +504,7 @@ def process_chat(
         sources=sources,
         session_id=request.session_id,
         no_results=False,
+        suggested_questions=suggestions,
     )
 
 
@@ -336,6 +515,7 @@ def process_chat_stream(
     embedding_client: EmbeddingClient,
     vector_db_client: VectorDBClient,
     translation_client: TranslationClient,
+    catalogue_vector_db_client: VectorDBClient | None = None,
 ) -> Generator[str, None, None]:
     """
     SSE generator for streaming chat responses.
@@ -349,6 +529,7 @@ def process_chat_stream(
     import json as _json
 
     try:
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'preparing'})}\n\n"
         session_uuid = UUID(request.session_id)
         chat_session: ChatSession | None = db.get(ChatSession, session_uuid)
         if chat_session is None:
@@ -366,13 +547,14 @@ def process_chat_stream(
         recent_messages: List[ChatMessage] = (
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == session_uuid)
-            .order_by(ChatMessage.created_at.desc())
+            .order_by(*newest_first_message_order())
             .limit(_HISTORY_WINDOW)
             .all()
         )
         recent_messages.reverse()
 
         # Language detection
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'language'})}\n\n"
         detected_language = "eng"
         if request.language_override:
             detected_language = request.language_override
@@ -395,6 +577,7 @@ def process_chat_stream(
                 logger.warning(f"Translation to English failed: {exc}")
 
         # Embed + search
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'searching'})}\n\n"
         query_vector = embedding_client.embed(english_message)
         search_results = vector_db_client.search(
             query_vector=query_vector,
@@ -415,6 +598,7 @@ def process_chat_stream(
 
         retrieval_outcome, top_score = _retrieval_outcome(search_results, chunks)
         _record_retrieval(db, retrieval_outcome, top_score)
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'reading_sources', 'source_count': len(search_results)})}\n\n"
 
         # History turns — use English content for assistant messages to avoid
         # tokenization overhead from non-Latin scripts in history
@@ -428,6 +612,17 @@ def process_chat_stream(
 
         # No-results shortcut
         if retrieval_outcome != "synthesized":
+            suggestions = _suggest_questions(
+                db,
+                llm_client=llm_client,
+                translation_client=translation_client,
+                catalogue_vector_db_client=catalogue_vector_db_client,
+                query_vector=query_vector,
+                question=english_message,
+                answer=None,
+                chunks=[],
+                language=detected_language,
+            )
             user_msg = ChatMessage(
                 session_id=session_uuid,
                 role=MessageRoleEnum.user,
@@ -441,6 +636,7 @@ def process_chat_stream(
                 content=_NO_RESULTS_ANSWER,
                 detected_language=detected_language,
                 sources=[],
+                suggested_questions=[item.model_dump() for item in suggestions],
             )
             db.add(user_msg)
             db.add(assistant_msg)
@@ -448,10 +644,11 @@ def process_chat_stream(
 
             chat_session.last_active_at = sqlfunc.now()
             db.commit()
-            yield f"data: {_json.dumps({'type': 'done', 'answer': _NO_RESULTS_ANSWER, 'sources': [], 'detected_language': detected_language, 'no_results': True, 'session_id': request.session_id})}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'answer': _NO_RESULTS_ANSWER, 'sources': [], 'suggested_questions': [item.model_dump() for item in suggestions], 'detected_language': detected_language, 'no_results': True, 'session_id': request.session_id})}\n\n"
             return
 
         # Stream tokens
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'synthesizing', 'source_count': len(search_results)})}\n\n"
         full_english_response = ""
         for token in llm_client.stream_answer(
             question=english_message, chunks=chunks, history=history_turns
@@ -469,26 +666,21 @@ def process_chat_stream(
             except Exception as exc:
                 logger.warning(f"Translation back to {detected_language} failed: {exc}")
 
-        # Build sources
-        sources: List[SourceRef] = []
-        seen_urls: set[str] = set()
-        for hit in search_results:
-            payload = hit.get("payload", {})
-            url = payload.get("source_url")
-            if url and url in seen_urls:
-                continue
-            if url:
-                seen_urls.add(url)
-            text = payload.get("text", "")
-            sources.append(
-                SourceRef(
-                    title=payload.get("title"),
-                    url=url,
-                    site_name=payload.get("site_name"),
-                    score=hit.get("score"),
-                    snippet=text[:200] if text else None,
-                )
-            )
+        # Build document-level sources and next questions while the completed
+        # answer is already visible in the stream.
+        sources = _build_sources(db, search_results)
+        yield f"data: {_json.dumps({'type': 'status', 'stage': 'followups'})}\n\n"
+        suggestions = _suggest_questions(
+            db,
+            llm_client=llm_client,
+            translation_client=translation_client,
+            catalogue_vector_db_client=catalogue_vector_db_client,
+            query_vector=query_vector,
+            question=english_message,
+            answer=full_english_response,
+            chunks=chunks,
+            language=detected_language,
+        )
 
         sources_dicts = [s.model_dump() for s in sources]
 
@@ -507,6 +699,7 @@ def process_chat_stream(
             english_content=full_english_response if detected_language != "eng" else None,
             detected_language=detected_language,
             sources=sources_dicts,
+            suggested_questions=[item.model_dump() for item in suggestions],
         )
         db.add(user_msg)
         db.add(assistant_msg)
@@ -526,7 +719,7 @@ def process_chat_stream(
             f"(lang={detected_language}, sources={len(sources)})"
         )
 
-        yield f"data: {_json.dumps({'type': 'done', 'answer': final_answer, 'sources': sources_dicts, 'detected_language': detected_language, 'no_results': False, 'session_id': request.session_id})}\n\n"
+        yield f"data: {_json.dumps({'type': 'done', 'answer': final_answer, 'sources': sources_dicts, 'suggested_questions': [item.model_dump() for item in suggestions], 'detected_language': detected_language, 'no_results': False, 'session_id': request.session_id})}\n\n"
 
     except LLMContextTooLargeError:
         logger.warning(f"Context too large for session {request.session_id}")

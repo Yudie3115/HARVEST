@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     catalogue_duplicate_threshold: float = Field(default=0.90)
     catalogue_match_threshold: float = Field(default=0.82)
     catalogue_match_observation_threshold: float = Field(default=0.0)
+    catalogue_suggestion_threshold: float = Field(default=0.65)
     catalogue_match_rate_limit: str = Field(default="30/hour")
     catalogue_helpful_rate_limit: str = Field(default="30/hour")
     catalogue_job_max_attempts: int = Field(default=5)

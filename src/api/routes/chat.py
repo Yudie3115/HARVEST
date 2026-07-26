@@ -163,6 +163,9 @@ async def chat(
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
+            catalogue_vector_db_client=getattr(
+                request.app.state, "catalogue_vector_db_client", None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -196,6 +199,9 @@ async def chat_stream(
             embedding_client=embedding_client,
             vector_db_client=vector_db_client,
             translation_client=translation_client,
+            catalogue_vector_db_client=getattr(
+                request.app.state, "catalogue_vector_db_client", None
+            ),
         )
 
     return StreamingResponse(

@@ -16,7 +16,7 @@ class LLMContextTooLargeError(Exception):
 
 class LLMClient:
     """Unified client for OpenAI and Ollama LLM providers"""
-    
+
     def __init__(
         self,
         provider: str = None,
@@ -32,12 +32,13 @@ class LLMClient:
             elif provider == "groq" and not settings.groq_api_key:
                 logger.warning("Groq API key not found, falling back to Ollama")
                 provider = "ollama"
-        
+
         self.provider = provider
         self.temperature = temperature
-        
+
         if self.provider == "openai":
             from openai import OpenAI
+
             if not settings.openai_api_key:
                 raise ValueError("OpenAI API key required but not found in settings")
 
@@ -48,6 +49,7 @@ class LLMClient:
 
         elif self.provider == "groq":
             from openai import OpenAI
+
             if not settings.groq_api_key:
                 raise ValueError("Groq API key required but not found in settings")
             self.client = OpenAI(
@@ -61,17 +63,20 @@ class LLMClient:
         elif self.provider == "ollama":
             try:
                 import ollama
+
                 self.client = ollama.Client(host=settings.ollama_base_url)
                 self.model = model or settings.ollama_model
                 self.temperature = temperature or settings.ollama_temperature
-                logger.info(f"Initialized Ollama client: {settings.ollama_base_url} with model {self.model}")
+                logger.info(
+                    f"Initialized Ollama client: {settings.ollama_base_url} with model {self.model}"
+                )
             except ImportError:
                 raise ImportError(
                     "Ollama package not installed. Install with: poetry install --extras ollama"
                 )
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -145,6 +150,7 @@ class LLMClient:
             if self.provider in ("openai", "groq"):
                 try:
                     from openai import APIStatusError
+
                     if isinstance(e, APIStatusError) and e.status_code == 413:
                         raise LLMContextTooLargeError(str(e)) from e
                 except ImportError:
@@ -152,6 +158,7 @@ class LLMClient:
             elif self.provider == "ollama":
                 try:
                     import ollama as _ollama
+
                     if isinstance(e, _ollama.ResponseError) and (
                         "context" in str(e).lower() or "too long" in str(e).lower()
                     ):
@@ -160,14 +167,14 @@ class LLMClient:
                     pass
             logger.error(f"LLM generation error ({self.provider}): {e}")
             raise
-    
+
     def classify_urls(self, urls: List[str]) -> List[Dict]:
         """
         Classify a batch of URLs for relevance to post-harvest topics
-        
+
         Args:
             urls: List of URLs to classify
-            
+
         Returns:
             List of classification results
         """
@@ -176,7 +183,7 @@ class LLMClient:
         all_results = []
 
         for i in range(0, len(urls), BATCH_SIZE):
-            batch = urls[i:i + BATCH_SIZE]
+            batch = urls[i : i + BATCH_SIZE]
 
             system_prompt = "You are a content classifier for an agricultural knowledge base focused on post-harvest practices in Uganda."
 
@@ -196,78 +203,79 @@ Relevant indicators: post-harvest, storage, drying, pest, loss, handling, preser
 
 Return as JSON with a single "urls" key containing the array.
 """
-            
+
             try:
                 response = self._generate(
                     prompt=prompt,
                     system_prompt=system_prompt,
                     response_format="json",
-                    temperature=0.1
+                    temperature=0.1,
                 )
                 batch_results = json.loads(response)
-                
+
                 # Ensure it's a list
-                if isinstance(batch_results, dict) and 'urls' in batch_results:
-                    batch_results = batch_results['urls']
+                if isinstance(batch_results, dict) and "urls" in batch_results:
+                    batch_results = batch_results["urls"]
                 elif not isinstance(batch_results, list):
                     batch_results = [batch_results]
-                
+
                 all_results.extend(batch_results)
-                
+
                 logger.debug(f"Classified batch of {len(batch)} URLs using {self.provider}")
-                
+
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LLM response: {e}")
                 # Return default classifications
-                all_results.extend([
-                    {
-                        "url": url,
-                        "relevance_score": 5.0,
-                        "topics": [],
-                        "document_type": "unknown",
-                        "priority": "medium",
-                        "reason": "Classification failed"
-                    }
-                    for url in batch
-                ])
+                all_results.extend(
+                    [
+                        {
+                            "url": url,
+                            "relevance_score": 5.0,
+                            "topics": [],
+                            "document_type": "unknown",
+                            "priority": "medium",
+                            "reason": "Classification failed",
+                        }
+                        for url in batch
+                    ]
+                )
             except Exception as e:
                 logger.error(f"URL classification error: {e}")
-                all_results.extend([
-                    {
-                        "url": url,
-                        "relevance_score": 5.0,
-                        "topics": [],
-                        "document_type": "unknown",
-                        "priority": "medium",
-                        "reason": f"Error: {str(e)}"
-                    }
-                    for url in batch
-                ])
-        
+                all_results.extend(
+                    [
+                        {
+                            "url": url,
+                            "relevance_score": 5.0,
+                            "topics": [],
+                            "document_type": "unknown",
+                            "priority": "medium",
+                            "reason": f"Error: {str(e)}",
+                        }
+                        for url in batch
+                    ]
+                )
+
         return all_results
-    
-    def classify_content(
-        self,
-        content: str,
-        url: str = "",
-        max_length: int = 4000
-    ) -> Dict:
+
+    def classify_content(self, content: str, url: str = "", max_length: int = 4000) -> Dict:
         """
         Classify document content and extract metadata
-        
+
         Args:
             content: Document text content
             url: Source URL
             max_length: Maximum content length to analyze
-            
+
         Returns:
             Classification metadata dictionary
         """
         # Truncate content if too long
         truncated_content = content[:max_length]
-        
-        system_prompt = "You are an agricultural content analyzer specializing in post-harvest practices."
-        
+
+        system_prompt = (
+            "You are an agricultural content analyzer specializing in post-harvest practices."
+        )
+
         prompt = f"""Analyze this agricultural document excerpt and extract structured metadata for a post-harvest knowledge base.
 
 Source URL: {url}
@@ -299,16 +307,13 @@ Scoring guide:
 
 Return as a single JSON object with all fields.
 """
-        
+
         try:
             response = self._generate(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                response_format="json",
-                temperature=0.2
+                prompt=prompt, system_prompt=system_prompt, response_format="json", temperature=0.2
             )
             classification = json.loads(response)
-            
+
             # Normalize field names: LLM may return primary_topics/crops_mentioned
             if "primary_topics" in classification and "topics" not in classification:
                 classification["topics"] = classification.pop("primary_topics")
@@ -322,42 +327,37 @@ Return as a single JSON object with all fields.
             classification.setdefault("regions", [])
             classification.setdefault("actionable", False)
             classification.setdefault("has_data", False)
-            
+
             logger.debug(
                 f"Classified content ({self.provider}): relevance={classification['relevance_score']}, "
                 f"topics={classification['topics']}"
             )
-            
+
             return classification
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse content classification: {e}")
             return self._default_classification(content)
         except Exception as e:
             logger.error(f"Content classification error: {e}")
             return self._default_classification(content)
-    
-    def extract_information(
-        self,
-        text: str,
-        query: str,
-        max_length: int = 3000
-    ) -> str:
+
+    def extract_information(self, text: str, query: str, max_length: int = 3000) -> str:
         """
         Extract specific information from text based on a query
-        
+
         Args:
             text: Source text
             query: Question or information to extract
             max_length: Maximum text length to analyze
-            
+
         Returns:
             Extracted information as string
         """
         truncated_text = text[:max_length]
-        
+
         system_prompt = "You are an expert at extracting information from agricultural documents."
-        
+
         prompt = f"""From this agricultural document, answer the following question or extract the requested information.
 
 Question: {query}
@@ -368,55 +368,52 @@ Document excerpt:
 Provide a concise, factual answer based only on the information in the document. 
 If the answer is not found in the document, respond with "Information not found in document."
 """
-        
+
         try:
             response = self._generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 response_format="",  # Free-form text
-                temperature=0.3
+                temperature=0.3,
             )
             return response.strip()
         except Exception as e:
             logger.error(f"Information extraction error: {e}")
             return "Error extracting information"
-    
+
     def summarize_batch(self, texts: List[str], max_length: int = 200) -> List[str]:
         """
         Generate summaries for a batch of texts
-        
+
         Args:
             texts: List of text content to summarize
             max_length: Maximum length per summary
-            
+
         Returns:
             List of summaries
         """
         summaries = []
-        
+
         for text in texts:
             system_prompt = "You are an expert at summarizing agricultural content."
-            
+
             prompt = f"""Provide a concise {max_length}-character summary of this agricultural text, focusing on key post-harvest practices and recommendations:
 
 {text[:2000]}
 
 Summary:"""
-            
+
             try:
                 summary = self._generate(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    response_format="",
-                    temperature=0.3
+                    prompt=prompt, system_prompt=system_prompt, response_format="", temperature=0.3
                 )
                 summaries.append(summary.strip()[:max_length])
             except Exception as e:
                 logger.error(f"Summarization error: {e}")
                 summaries.append(text[:max_length] + "...")
-        
+
         return summaries
-    
+
     @staticmethod
     def _default_classification(content: str) -> Dict:
         """Return default classification when LLM fails"""
@@ -434,7 +431,7 @@ Summary:"""
             "has_data": False,
             "technical_level": "unknown",
         }
-    
+
     def answer_question(
         self,
         question: str,
@@ -448,6 +445,7 @@ Summary:"""
         Returns the LLM's answer string (may include [1]-style citations).
         """
         from src.llm.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
+
         prompt = build_qa_prompt(question, chunks)
         return self._generate(
             prompt=prompt,
@@ -490,6 +488,49 @@ and answers that depend on missing conversational context."""
             raise ValueError("LLM returned an empty optimised_question")
         return {"worth_cataloguing_score": score, "optimised_question": optimised}
 
+    def suggest_followup_questions(
+        self,
+        question: str,
+        answer: str,
+        chunks: List[Dict],
+    ) -> List[str]:
+        """Generate a small set of grounded, useful next research questions."""
+        evidence = "\n\n".join(str(chunk.get("text", ""))[:600] for chunk in chunks[:4])
+        prompt = f"""Suggest three useful follow-up questions for a researcher reading this answer.
+
+Original question:
+{question[:1500]}
+
+Answer:
+{answer[:5000]}
+
+Available evidence excerpts:
+{evidence[:2400]}
+
+Return JSON with exactly one key, "questions", containing 3 concise standalone questions.
+Questions should deepen, compare, quantify, or turn the answer into a practical next step.
+Do not claim that the evidence contains information it does not contain."""
+        raw = self._generate(
+            prompt=prompt,
+            system_prompt=(
+                "You help researchers navigate trusted post-harvest agriculture evidence. "
+                "Return valid JSON only."
+            ),
+            response_format="json",
+            temperature=0.2,
+            max_tokens=350,
+        )
+        result = json.loads(raw)
+        questions = result.get("questions")
+        if not isinstance(questions, list):
+            raise ValueError("LLM returned invalid follow-up questions")
+        cleaned: List[str] = []
+        for value in questions:
+            text = str(value).strip()[:240]
+            if text and text not in cleaned:
+                cleaned.append(text)
+        return cleaned[:3]
+
     def stream_answer(
         self,
         question: str,
@@ -501,6 +542,7 @@ and answers that depend on missing conversational context."""
         Does not use @retry — retrying a half-consumed stream is unsafe.
         """
         from src.llm.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
+
         prompt = build_qa_prompt(question, chunks)
 
         messages = []
@@ -543,6 +585,7 @@ and answers that depend on missing conversational context."""
             if self.provider in ("openai", "groq"):
                 try:
                     from openai import APIStatusError
+
                     if isinstance(exc, APIStatusError) and exc.status_code == 413:
                         raise LLMContextTooLargeError(str(exc)) from exc
                 except ImportError:
@@ -564,12 +607,15 @@ and answers that depend on missing conversational context."""
                 return True
             else:  # ollama
                 tags = self.client.list()
-                models = tags.get("models", []) if isinstance(tags, dict) else getattr(tags, "models", [])
+                models = (
+                    tags.get("models", [])
+                    if isinstance(tags, dict)
+                    else getattr(tags, "models", [])
+                )
 
                 available_models = [
                     (
-                        m.get("name")
-                        or m.get("model")
+                        m.get("name") or m.get("model")
                         if isinstance(m, dict)
                         else getattr(m, "name", None) or getattr(m, "model", None)
                     )

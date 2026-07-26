@@ -1,15 +1,27 @@
 """
 API response models
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SourceRef(BaseModel):
-    title: str | None
-    url: str | None
-    site_name: str | None
+    title: str | None = None
+    url: str | None = None
+    site_name: str | None = None
     score: float | None = None
     snippet: str | None = None
+    document_id: str | None = None
+    summary: str | None = None
+    document_type: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    citation_indices: list[int] = Field(default_factory=list)
+    library_url: str | None = None
+
+
+class SuggestedQuestion(BaseModel):
+    text: str
+    kind: str = "generated"
+    catalogue_entry_id: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -23,6 +35,7 @@ class ChatResponse(BaseModel):
     sources: list[SourceRef]
     session_id: str
     no_results: bool = False
+    suggested_questions: list[SuggestedQuestion] = Field(default_factory=list)
 
 
 class HistoryMessage(BaseModel):
@@ -30,6 +43,7 @@ class HistoryMessage(BaseModel):
     content: str
     detected_language: str | None
     sources: list[SourceRef] | None
+    suggested_questions: list[SuggestedQuestion] = Field(default_factory=list)
 
 
 class SessionHistoryResponse(BaseModel):

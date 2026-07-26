@@ -11,10 +11,7 @@ class TestLLMClientStreaming:
 
     def _make_client_and_mock(self, tokens: list):
         mock_openai = MagicMock()
-        chunks = [
-            MagicMock(choices=[MagicMock(delta=MagicMock(content=t))])
-            for t in tokens
-        ]
+        chunks = [MagicMock(choices=[MagicMock(delta=MagicMock(content=t))]) for t in tokens]
         # Final chunk with content=None (OpenAI end-of-stream marker)
         chunks.append(MagicMock(choices=[MagicMock(delta=MagicMock(content=None))]))
         mock_openai.chat.completions.create.return_value = iter(chunks)
@@ -28,6 +25,7 @@ class TestLLMClientStreaming:
             s.relevance_threshold = 6.0
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.client import LLMClient
+
                 return LLMClient(provider="openai"), mock_openai
 
     def test_stream_answer_yields_tokens(self):
@@ -81,6 +79,7 @@ class TestLLMClientHistory:
             s.relevance_threshold = 6.0
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.client import LLMClient
+
                 return LLMClient(provider="openai"), mock_openai
 
     def test_generate_without_history_sends_two_messages(self):
@@ -99,7 +98,9 @@ class TestLLMClientHistory:
             {"role": "user", "content": "first question"},
             {"role": "assistant", "content": "first answer"},
         ]
-        client._generate("second question", system_prompt="sys", response_format="", history=history)
+        client._generate(
+            "second question", system_prompt="sys", response_format="", history=history
+        )
         call_args = mock_api.chat.completions.create.call_args
         messages = call_args.kwargs["messages"]
         # system + 2 history + current user
@@ -116,7 +117,12 @@ class TestLLMClientHistory:
             {"role": "user", "content": "what is drying?"},
             {"role": "assistant", "content": "Drying reduces moisture content."},
         ]
-        chunks = [{"text": "Maize should be dried below 13.5%.", "source_url": "https://naro.go.ug/guide.pdf"}]
+        chunks = [
+            {
+                "text": "Maize should be dried below 13.5%.",
+                "source_url": "https://naro.go.ug/guide.pdf",
+            }
+        ]
         result = client.answer_question("What temperature?", chunks=chunks, history=history)
         assert result == "answer with history"
         call_args = mock_api.chat.completions.create.call_args
@@ -136,10 +142,29 @@ class TestLLMClientHistory:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
 
+    def test_suggest_followups_returns_bounded_unique_questions(self):
+        client, _ = self._make_client_and_mock(
+            '{"questions":["How is moisture measured?",'
+            '"How is moisture measured?","Which dryer is suitable?","A fourth?"]}'
+        )
+
+        result = client.suggest_followup_questions(
+            "How should maize be dried?",
+            "Dry maize to a safe moisture content.",
+            [{"text": "Use raised tarpaulins and monitor moisture."}],
+        )
+
+        assert result == [
+            "How is moisture measured?",
+            "Which dryer is suitable?",
+            "A fourth?",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # LLM Client
 # ---------------------------------------------------------------------------
+
 
 class TestLLMClient:
     """Tests for LLMClient using a mocked OpenAI backend"""
@@ -159,28 +184,31 @@ class TestLLMClient:
             s.relevance_threshold = 6.0
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.client import LLMClient
+
                 return LLMClient(provider="openai"), mock_openai
 
     def test_classify_urls_returns_list(self):
         urls = ["https://naro.go.ug/guide.pdf", "https://naro.go.ug/about"]
-        response = json.dumps({
-            "urls": [
-                {
-                    "url": urls[0],
-                    "relevance_score": 8.5,
-                    "topics": ["storage"],
-                    "document_type": "research_paper",
-                    "priority": "high",
-                },
-                {
-                    "url": urls[1],
-                    "relevance_score": 2.0,
-                    "topics": [],
-                    "document_type": "webpage",
-                    "priority": "low",
-                },
-            ]
-        })
+        response = json.dumps(
+            {
+                "urls": [
+                    {
+                        "url": urls[0],
+                        "relevance_score": 8.5,
+                        "topics": ["storage"],
+                        "document_type": "research_paper",
+                        "priority": "high",
+                    },
+                    {
+                        "url": urls[1],
+                        "relevance_score": 2.0,
+                        "topics": [],
+                        "document_type": "webpage",
+                        "priority": "low",
+                    },
+                ]
+            }
+        )
         client, _ = self._make_client(response)
         results = client.classify_urls(urls)
         assert isinstance(results, list)
@@ -196,32 +224,38 @@ class TestLLMClient:
         assert results[0]["relevance_score"] == 5.0  # default
 
     def test_classify_content_returns_dict(self):
-        response = json.dumps({
-            "primary_topics": ["storage", "drying"],
-            "crops_mentioned": ["maize"],
-            "regions": ["Northern Uganda"],
-            "document_type": "extension_guide",
-            "target_audience": ["farmers"],
-            "language": "en",
-            "relevance_score": 8.5,
-            "summary": "A guide to post-harvest storage.",
-            "key_practices": ["dry to 13.5% moisture"],
-            "actionable": True,
-            "has_data": False,
-            "technical_level": "Simple",
-        })
+        response = json.dumps(
+            {
+                "primary_topics": ["storage", "drying"],
+                "crops_mentioned": ["maize"],
+                "regions": ["Northern Uganda"],
+                "document_type": "extension_guide",
+                "target_audience": ["farmers"],
+                "language": "en",
+                "relevance_score": 8.5,
+                "summary": "A guide to post-harvest storage.",
+                "key_practices": ["dry to 13.5% moisture"],
+                "actionable": True,
+                "has_data": False,
+                "technical_level": "Simple",
+            }
+        )
         client, _ = self._make_client(response)
-        result = client.classify_content("Maize should be dried before storage.", url="https://naro.go.ug/guide")
+        result = client.classify_content(
+            "Maize should be dried before storage.", url="https://naro.go.ug/guide"
+        )
         assert isinstance(result, dict)
         assert result["relevance_score"] == 8.5
         assert "storage" in result["topics"]
 
     def test_classify_content_normalises_primary_topics(self):
         """primary_topics key should be normalised to topics"""
-        response = json.dumps({
-            "primary_topics": ["pest_management"],
-            "relevance_score": 7.0,
-        })
+        response = json.dumps(
+            {
+                "primary_topics": ["pest_management"],
+                "relevance_score": 7.0,
+            }
+        )
         client, _ = self._make_client(response)
         result = client.classify_content("About pest management.")
         assert "topics" in result
@@ -235,6 +269,7 @@ class TestLLMClient:
 
     def test_default_classification(self):
         from src.llm.client import LLMClient
+
         default = LLMClient._default_classification("test content")
         assert "relevance_score" in default
         assert "topics" in default
@@ -246,9 +281,11 @@ class TestLLMClient:
 # Prompts
 # ---------------------------------------------------------------------------
 
+
 class TestPrompts:
     def test_url_classification_prompt_contains_urls(self):
         from src.llm.prompts import build_url_classification_prompt
+
         urls = ["https://naro.go.ug/a.pdf", "https://naro.go.ug/b.html"]
         prompt = build_url_classification_prompt(urls)
         assert "naro.go.ug/a.pdf" in prompt
@@ -256,6 +293,7 @@ class TestPrompts:
 
     def test_content_classification_prompt_contains_content(self):
         from src.llm.prompts import build_content_classification_prompt
+
         content = "Maize storage reduces losses."
         url = "https://naro.go.ug/guide"
         prompt = build_content_classification_prompt(content, url)
@@ -264,6 +302,7 @@ class TestPrompts:
 
     def test_summarisation_prompt_truncates(self):
         from src.llm.prompts import build_summarisation_prompt
+
         long_text = "word " * 10000
         prompt = build_summarisation_prompt(long_text, max_length=200)
         # Prompt should not include the full 50,000-char text
@@ -273,6 +312,7 @@ class TestPrompts:
 # ---------------------------------------------------------------------------
 # Embeddings
 # ---------------------------------------------------------------------------
+
 
 class TestEmbeddingClient:
     def test_embed_single_openai(self):
@@ -288,6 +328,7 @@ class TestEmbeddingClient:
             s.embedding_batch_size = 32
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.embeddings import EmbeddingClient
+
                 client = EmbeddingClient(provider="openai")
                 vec = client.embed("Post-harvest storage guide")
                 assert len(vec) == 1536
@@ -297,10 +338,7 @@ class TestEmbeddingClient:
         texts = ["text one", "text two", "text three"]
         mock_openai = MagicMock()
         mock_openai.embeddings.create.return_value = MagicMock(
-            data=[
-                MagicMock(embedding=[float(i)] * 1536, index=i)
-                for i in range(len(texts))
-            ]
+            data=[MagicMock(embedding=[float(i)] * 1536, index=i) for i in range(len(texts))]
         )
         with patch("src.llm.embeddings.settings") as s:
             s.openai_api_key = "sk-test"
@@ -310,6 +348,7 @@ class TestEmbeddingClient:
             s.embedding_batch_size = 32
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.embeddings import EmbeddingClient
+
                 client = EmbeddingClient(provider="openai")
                 vecs = client.embed_batch(texts)
                 assert len(vecs) == 3
@@ -328,6 +367,7 @@ class TestEmbeddingClient:
             s.embedding_batch_size = 32
             with patch("openai.OpenAI", return_value=mock_openai):
                 from src.llm.embeddings import EmbeddingClient
+
                 client = EmbeddingClient(provider="openai")
                 # Empty string should be replaced with " " to avoid API errors
                 vec = client.embed("")

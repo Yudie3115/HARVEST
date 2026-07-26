@@ -9,9 +9,16 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db, get_web_grant
 from src.api.models.requests import CatalogueSessionRequest, NewSessionRequest
-from src.api.models.responses import HistoryMessage, SessionHistoryResponse, SessionResponse, SourceRef
+from src.api.models.responses import (
+    HistoryMessage,
+    SessionHistoryResponse,
+    SessionResponse,
+    SourceRef,
+    SuggestedQuestion,
+)
 from src.api.services import access_service
 from src.api.services.access_service import ResolvedGrant, SessionForbiddenError
+from src.api.services.message_ordering import newest_first_message_order
 from src.storage.models import (
     CatalogueEntry,
     CatalogueStatusEnum,
@@ -44,6 +51,7 @@ async def create_session(
         )
 
     import uuid
+
     chat_session = ChatSession(
         channel=channel,
         identifier=str(uuid.uuid4()),  # web sessions use a generated UUID as identifier
@@ -53,7 +61,9 @@ async def create_session(
     db.commit()
     db.refresh(chat_session)
 
-    logger.info(f"Created chat session {chat_session.id} (channel={channel}, grant={resolved.grant.id})")
+    logger.info(
+        f"Created chat session {chat_session.id} (channel={channel}, grant={resolved.grant.id})"
+    )
 
     return SessionResponse(
         session_id=str(chat_session.id),
@@ -139,7 +149,7 @@ async def get_session_history(
     messages: list[ChatMessage] = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_uuid)
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(*newest_first_message_order())
         .limit(_HISTORY_LIMIT)
         .all()
     )
@@ -150,11 +160,10 @@ async def get_session_history(
             role=msg.role.value,
             content=msg.content,
             detected_language=msg.detected_language,
-            sources=(
-                [SourceRef(**s) for s in msg.sources]
-                if msg.sources
-                else None
-            ),
+            sources=([SourceRef(**s) for s in msg.sources] if msg.sources else None),
+            suggested_questions=[
+                SuggestedQuestion(**item) for item in (msg.suggested_questions or [])
+            ],
         )
         for msg in messages
     ]

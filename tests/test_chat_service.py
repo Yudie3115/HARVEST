@@ -414,6 +414,7 @@ def test_min_top_score_allows_stream_synthesis_above_threshold(mocks):
 
     mocks["vector_db"].search.return_value[0]["score"] = 0.6
     mocks["llm"].stream_answer.return_value = ["Post", "-harvest loss."]
+    mocks["llm"].suggest_followup_questions.return_value = ["How can these losses be measured?"]
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
@@ -434,6 +435,26 @@ def test_min_top_score_allows_stream_synthesis_above_threshold(mocks):
     payload = json.loads(events[-1].removeprefix("data: "))
     assert payload["type"] == "done"
     assert payload["no_results"] is False
+    assert payload["suggested_questions"] == [
+        {
+            "text": "How can these losses be measured?",
+            "kind": "generated",
+            "catalogue_entry_id": None,
+        }
+    ]
+    stages = [
+        json.loads(event.removeprefix("data: "))["stage"]
+        for event in events
+        if json.loads(event.removeprefix("data: ")).get("type") == "status"
+    ]
+    assert stages == [
+        "preparing",
+        "language",
+        "searching",
+        "reading_sources",
+        "synthesizing",
+        "followups",
+    ]
     metrics = [
         call.args[0]
         for call in mocks["db"].add.call_args_list
@@ -441,3 +462,101 @@ def test_min_top_score_allows_stream_synthesis_above_threshold(mocks):
     ]
     assert metrics[0].metric_value == 0.6
     assert metrics[0].extra_metadata["outcome"] == "synthesized"
+
+
+def test_sources_are_grouped_into_enriched_document_references(mocks):
+    from src.api.services.chat_service import process_chat
+    from src.storage.models import Document, DocumentClassification
+
+    document_id = uuid.uuid4()
+    document = Document(
+        id=document_id,
+        url="https://example.org/maize-guide.pdf",
+        public_source_url="https://example.org/maize-guide.pdf",
+        title="Maize Drying Guide",
+        site_name="naro",
+        publicly_visible=True,
+    )
+    document.classification = DocumentClassification(
+        summary="A practical guide to safe moisture targets and drying methods.",
+        topics=["drying", "quality_control"],
+        document_category="extension_guide",
+    )
+    mocks["vector_db"].search.return_value = [
+        {
+            "id": "chunk-one",
+            "score": 0.91,
+            "payload": {
+                "document_id": str(document_id),
+                "text": "Dry maize before storage.",
+                "source_url": document.url,
+            },
+        },
+        {
+            "id": "chunk-two",
+            "score": 0.86,
+            "payload": {
+                "document_id": str(document_id),
+                "text": "Use a moisture meter where possible.",
+                "source_url": document.url,
+            },
+        },
+    ]
+    session = _make_session(mocks["session_id"])
+    mocks["db"].get.side_effect = lambda model, value: document if model is Document else session
+
+    result = process_chat(
+        request=_make_request(mocks["session_id"]),
+        db=mocks["db"],
+        llm_client=mocks["llm"],
+        embedding_client=mocks["embedding"],
+        vector_db_client=mocks["vector_db"],
+        translation_client=mocks["translation"],
+    )
+
+    assert len(result.sources) == 1
+    source = result.sources[0]
+    assert source.title == "Maize Drying Guide"
+    assert source.summary.startswith("A practical guide")
+    assert source.citation_indices == [1, 2]
+    assert source.library_url == f"/documents/{document_id}"
+
+
+def test_suggestions_mix_reviewed_catalogue_and_generated_questions(mocks):
+    from src.api.services.chat_service import _suggest_questions
+    from src.storage.models import CatalogueEntry, CatalogueStatusEnum
+
+    entry = CatalogueEntry(
+        id=uuid.uuid4(),
+        question_en="How can maize moisture be measured?",
+        answer_en="Use a calibrated moisture meter.",
+        status=CatalogueStatusEnum.approved,
+    )
+    catalogue_vectors = MagicMock()
+    catalogue_vectors.search.return_value = [
+        {
+            "id": str(entry.id),
+            "score": 0.78,
+            "payload": {"catalogue_entry_id": str(entry.id)},
+        }
+    ]
+    mocks["db"].get.return_value = entry
+    mocks["llm"].suggest_followup_questions.return_value = ["Which drying surface is safest?"]
+
+    with patch("src.api.services.chat_service.settings") as config:
+        config.catalogue_match_observation_threshold = 0.0
+        config.catalogue_suggestion_threshold = 0.65
+        result = _suggest_questions(
+            mocks["db"],
+            llm_client=mocks["llm"],
+            translation_client=mocks["translation"],
+            catalogue_vector_db_client=catalogue_vectors,
+            query_vector=[0.1] * 1536,
+            question="How should maize be dried?",
+            answer="Dry it to a safe moisture content.",
+            chunks=[{"text": "Dry maize on a clean surface."}],
+            language="eng",
+        )
+
+    assert [item.kind for item in result] == ["catalogue", "generated"]
+    assert result[0].catalogue_entry_id == str(entry.id)
