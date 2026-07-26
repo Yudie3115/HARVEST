@@ -12,7 +12,10 @@ const ACCEPTED = {
   'text/html': ['.html', '.htm'],
 }
 
-function ResultBanner({ result, onDismiss }) {
+const MAX_FILES = 20
+const MAX_FILE_SIZE = 50 * 1024 * 1024
+
+function ResultBanner({ result, onDismiss, label }) {
   if (!result) return null
 
   if (result.status === 'processed') {
@@ -22,9 +25,10 @@ function ResultBanner({ result, onDismiss }) {
       <div className="flex items-start gap-2.5 bg-green-500/5 border border-green-500/20 rounded-md px-4 py-3 text-[12px] text-green-300">
         <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
         <div>
+          {label && <span className="font-medium">{label}: </span>}
           Document added successfully — {result.chunks} chunks indexed. Relevance: {score}/10
         </div>
-        <button onClick={onDismiss} className="ml-auto text-green-500 hover:text-green-300">×</button>
+        {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-green-500 hover:text-green-300">×</button>}
       </div>
     )
   }
@@ -36,11 +40,12 @@ function ResultBanner({ result, onDismiss }) {
       <div className="flex items-start gap-2.5 bg-yellow-500/5 border border-yellow-500/20 rounded-md px-4 py-3 text-[12px] text-yellow-300">
         <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
         <div>
+          {label && <span className="font-medium">{label}: </span>}
           {result.reason === 'low_relevance'
             ? `Document rejected — not relevant enough to post-harvest knowledge${score}.`
             : 'Document skipped — no extractable text content was found.'}
         </div>
-        <button onClick={onDismiss} className="ml-auto text-yellow-500 hover:text-yellow-300">×</button>
+        {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-yellow-500 hover:text-yellow-300">×</button>}
       </div>
     )
   }
@@ -48,42 +53,94 @@ function ResultBanner({ result, onDismiss }) {
   return (
     <div className="flex items-start gap-2.5 bg-red-500/5 border border-red-500/20 rounded-md px-4 py-3 text-[12px] text-red-300">
       <XCircle size={14} className="flex-shrink-0 mt-0.5" />
-      <div>{result.error || 'Ingestion failed. Check the application logs.'}</div>
-      <button onClick={onDismiss} className="ml-auto text-red-500 hover:text-red-300">×</button>
+      <div>
+        {label && <span className="font-medium">{label}: </span>}
+        {result.error || 'Ingestion failed. Check the application logs.'}
+      </div>
+      {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-red-500 hover:text-red-300">×</button>}
     </div>
   )
 }
 
 function FileTab() {
-  const [file, setFile] = useState(null)
-  const [title, setTitle] = useState('')
+  const [items, setItems] = useState([])
   const [site, setSite] = useState('manual')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
+  const [selectionError, setSelectionError] = useState(null)
 
-  const onDrop = useCallback(accepted => {
-    if (accepted[0]) setFile(accepted[0])
+  const onDrop = useCallback((accepted, rejected) => {
+    setItems(current => {
+      const known = new Set(current.map(item => (
+        `${item.file.name}:${item.file.size}:${item.file.lastModified}`
+      )))
+      const additions = accepted
+        .filter(file => !known.has(`${file.name}:${file.size}:${file.lastModified}`))
+        .slice(0, Math.max(0, MAX_FILES - current.length))
+        .map(file => ({
+          id: `${file.name}:${file.size}:${file.lastModified}`,
+          file,
+          title: '',
+          state: 'queued',
+          result: null,
+        }))
+      return [...current, ...additions]
+    })
+
+    const errors = rejected.flatMap(({ file, errors: fileErrors }) => (
+      fileErrors.map(error => {
+        if (error.code === 'file-too-large') return `${file.name} exceeds the 50 MB limit.`
+        if (error.code === 'file-invalid-type') return `${file.name} is not a supported document type.`
+        if (error.code === 'too-many-files') return `Select no more than ${MAX_FILES} files at once.`
+        return `${file.name}: ${error.message}`
+      })
+    ))
+    setSelectionError(errors.length ? errors.join(' ') : null)
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop, accept: ACCEPTED, maxFiles: 1,
+    onDrop,
+    accept: ACCEPTED,
+    maxFiles: MAX_FILES,
+    maxSize: MAX_FILE_SIZE,
+    multiple: true,
+    disabled: loading,
   })
+
+  function updateItem(id, changes) {
+    setItems(current => current.map(item => (
+      item.id === id ? { ...item, ...changes } : item
+    )))
+  }
+
+  function removeItem(id) {
+    setItems(current => current.filter(item => item.id !== id))
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!file) return
+    const queued = items.filter(item => item.state === 'queued')
+    if (!queued.length) return
+
     setLoading(true)
-    setResult(null)
-    try {
-      const r = await adminApi.ingestFile(file, title, site)
-      setResult(r)
-      if (r.status === 'processed') { setFile(null); setTitle('') }
-    } catch (e) {
-      setResult({ status: 'failed', error: e.message })
-    } finally {
-      setLoading(false)
+    setSelectionError(null)
+
+    for (const item of queued) {
+      updateItem(item.id, { state: 'processing', result: null })
+      try {
+        const result = await adminApi.ingestFile(item.file, item.title, site)
+        updateItem(item.id, { state: 'finished', result })
+      } catch (error) {
+        updateItem(item.id, {
+          state: 'finished',
+          result: { status: 'failed', error: error.message },
+        })
+      }
     }
+
+    setLoading(false)
   }
+
+  const queuedCount = items.filter(item => item.state === 'queued').length
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -98,45 +155,99 @@ function FileTab() {
         ].join(' ')}
       >
         <input {...getInputProps()} />
-        {file ? (
-          <div className="flex items-center justify-center gap-2.5 text-admin-text">
-            <FileText size={18} className="text-admin-accent" />
-            <div className="text-left">
-              <p className="text-[13px] font-medium">{file.name}</p>
-              <p className="text-[11px] text-admin-muted">{(file.size / 1024).toFixed(1)} KB</p>
-            </div>
+        <Upload size={20} className="text-admin-muted mx-auto mb-2" />
+        <p className="text-[12px] text-admin-text font-medium mb-1">
+          {isDragActive ? 'Drop documents here' : 'Drop documents or click to browse'}
+        </p>
+        <p className="text-[11px] text-admin-muted">
+          Up to {MAX_FILES} PDF, DOCX, DOC, or HTML files · max 50 MB each
+        </p>
+      </div>
+
+      {selectionError && (
+        <div className="flex items-start gap-2 rounded-md border border-red-500/20 bg-red-500/5 px-4 py-3 text-[12px] text-red-300">
+          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+          <span>{selectionError}</span>
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-admin-border bg-admin-surface">
+          <div className="flex items-center justify-between border-b border-admin-border px-4 py-2.5">
+            <span className="text-[11px] font-medium text-admin-text">
+              {items.length} document{items.length === 1 ? '' : 's'} selected
+            </span>
+            {!loading && (
+              <button
+                type="button"
+                onClick={() => setItems([])}
+                className="text-[10px] text-admin-muted hover:text-admin-text"
+              >
+                Clear all
+              </button>
+            )}
           </div>
-        ) : (
-          <>
-            <Upload size={20} className="text-admin-muted mx-auto mb-2" />
-            <p className="text-[12px] text-admin-text font-medium mb-1">
-              {isDragActive ? 'Drop file here' : 'Drop a file or click to browse'}
-            </p>
-            <p className="text-[11px] text-admin-muted">PDF, DOCX, DOC, HTML · max 50 MB</p>
-          </>
-        )}
+
+          <div className="divide-y divide-admin-border">
+            {items.map(item => (
+              <div key={item.id} className="space-y-2.5 px-4 py-3">
+                <div className="flex items-start gap-2.5">
+                  {item.state === 'processing'
+                    ? <Loader2 size={15} className="mt-0.5 flex-shrink-0 animate-spin text-admin-accent" />
+                    : <FileText size={15} className="mt-0.5 flex-shrink-0 text-admin-accent" />}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-medium text-admin-text">{item.file.name}</p>
+                    <p className="text-[10px] text-admin-muted">
+                      {(item.file.size / 1024).toFixed(1)} KB
+                      {item.state === 'processing' && ' · Processing…'}
+                    </p>
+                  </div>
+                  {item.state === 'queued' && !loading && (
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.id)}
+                      aria-label={`Remove ${item.file.name}`}
+                      className="text-admin-muted hover:text-red-400"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                {item.state === 'queued' && (
+                  <Input
+                    value={item.title}
+                    onChange={event => updateItem(item.id, { title: event.target.value })}
+                    placeholder="Optional document title"
+                  />
+                )}
+
+                {item.result && <ResultBanner result={item.result} label={item.file.name} />}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-[10px] font-medium text-admin-muted uppercase tracking-wider mb-1.5">
+          Source / site name
+        </label>
+        <Input
+          value={site}
+          onChange={e => setSite(e.target.value)}
+          placeholder="manual"
+          disabled={loading}
+        />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-[10px] font-medium text-admin-muted uppercase tracking-wider mb-1.5">
-            Title (optional)
-          </label>
-          <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Document title" />
-        </div>
-        <div>
-          <label className="block text-[10px] font-medium text-admin-muted uppercase tracking-wider mb-1.5">
-            Source / site name
-          </label>
-          <Input value={site} onChange={e => setSite(e.target.value)} placeholder="manual" />
-        </div>
-      </div>
-
-      <ResultBanner result={result} onDismiss={() => setResult(null)} />
-
-      <Button type="submit" disabled={!file || loading}>
+      <Button type="submit" disabled={!queuedCount || loading}>
         {loading && <Loader2 size={13} className="animate-spin" />}
-        {loading ? 'Processing…' : 'Add File to Knowledge Base'}
+        {loading
+          ? 'Processing documents…'
+          : queuedCount
+            ? `Add ${queuedCount} Document${queuedCount === 1 ? '' : 's'} to Knowledge Base`
+            : 'Add Documents to Knowledge Base'}
       </Button>
     </form>
   )

@@ -9,7 +9,19 @@ from uuid import UUID
 
 import httpx
 from loguru import logger
-from prefect import flow, task
+
+try:
+    from prefect import flow, task
+except ImportError:
+    # The lightweight API image executes these helpers directly for Admin
+    # uploads and intentionally does not ship the Prefect orchestration stack.
+    def _direct_decorator(*decorator_args, **decorator_kwargs):
+        if decorator_args and callable(decorator_args[0]) and len(decorator_args) == 1:
+            return decorator_args[0]
+        return lambda function: function
+
+    flow = _direct_decorator
+    task = _direct_decorator
 
 from src.config.site_configs import get_site_name_for_url
 from src.config.settings import settings
@@ -163,6 +175,19 @@ def extract_content(download_result: Dict, url: str = "") -> Optional[str]:
             result = extract_pdf_full(tmp_path)
             text = result.get("text", "")
             Path(tmp_path).unlink(missing_ok=True)
+
+        elif doc_type == "word":
+            from io import BytesIO
+            from docx import Document as WordDocument
+
+            document = WordDocument(BytesIO(content))
+            parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+            for table in document.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        parts.append(" | ".join(cells))
+            text = "\n\n".join(parts)
 
         elif doc_type == "video":
             from src.extractors.video_extractor import extract_video_full

@@ -28,7 +28,10 @@ async function request(method, path, body, isFormData = false) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || 'Request failed')
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map(item => item.msg || String(item)).join('; ')
+      : err.detail
+    throw new Error(typeof detail === 'string' ? detail : 'Request failed')
   }
 
   return res.json()

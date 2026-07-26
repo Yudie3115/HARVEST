@@ -33,11 +33,11 @@ def extract_pdf_text(file_path: Union[str, Path]) -> Optional[str]:
             if text.strip():
                 pages_text.append(text.strip())
 
+        page_count = len(doc)
         doc.close()
         full_text = "\n\n".join(pages_text)
         logger.debug(
-            f"PyMuPDF extracted {len(full_text)} chars from {file_path} "
-            f"({len(doc)} pages)"
+            f"PyMuPDF extracted {len(full_text)} chars from {file_path} " f"({page_count} pages)"
         )
         return full_text if full_text.strip() else None
 
@@ -66,10 +66,7 @@ def extract_pdf_tables(file_path: Union[str, Path]) -> List[List[List[str]]]:
                 page_tables = page.extract_tables()
                 for table in page_tables:
                     # Normalise None cells to empty string
-                    clean_table = [
-                        [cell or "" for cell in row]
-                        for row in table
-                    ]
+                    clean_table = [[cell or "" for cell in row] for row in table]
                     tables.append(clean_table)
 
         logger.debug(f"pdfplumber extracted {len(tables)} tables from {file_path}")
@@ -121,6 +118,7 @@ def extract_pdf_metadata(file_path: Union[str, Path]) -> Dict:
 
         doc = fitz.open(str(file_path))
         raw_meta = doc.metadata or {}
+        page_count = doc.page_count
         doc.close()
 
         meta = {
@@ -128,7 +126,7 @@ def extract_pdf_metadata(file_path: Union[str, Path]) -> Dict:
             "author": raw_meta.get("author", ""),
             "subject": raw_meta.get("subject", ""),
             "creator": raw_meta.get("creator", ""),
-            "page_count": doc.page_count,
+            "page_count": page_count,
         }
     except Exception as e:
         logger.warning(f"PDF metadata extraction failed for {file_path}: {e}")

@@ -9,6 +9,9 @@ WORKDIR /app
 COPY requirements.api.txt ./
 RUN pip install --no-cache-dir -r requirements.api.txt
 
+COPY requirements.ingestion.txt ./
+RUN pip install --no-cache-dir -r requirements.ingestion.txt
+
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 

@@ -38,6 +38,7 @@ from src.storage.models import Document, DocumentStatus
 
 _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_HOURS = 8
+_MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
 
 security = HTTPBearer()
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -548,22 +549,40 @@ async def ingest_document(
     if file is None and not url:
         raise HTTPException(status_code=400, detail="Provide either a file upload or a url field.")
 
-    from src.flows.manual_ingestion import ingest_manual_document
+    try:
+        from src.flows.manual_ingestion import ingest_manual_document
 
-    if file is not None:
-        content = await file.read()
-        result = ingest_manual_document(
-            content=content,
-            filename=file.filename,
-            title=title or None,
-            site_name=site_name or "manual",
-        )
-    else:
-        result = ingest_manual_document(
-            url=url,
-            title=title or None,
-            site_name=site_name or "manual",
-        )
+        if file is not None:
+            content = await file.read(_MAX_DOCUMENT_UPLOAD_BYTES + 1)
+            if len(content) > _MAX_DOCUMENT_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{file.filename or 'Document'} exceeds the 50 MB upload limit.",
+                )
+            result = ingest_manual_document(
+                content=content,
+                filename=file.filename,
+                title=title or None,
+                site_name=site_name or "manual",
+            )
+        else:
+            result = ingest_manual_document(
+                url=url,
+                title=title or None,
+                site_name=site_name or "manual",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        source = file.filename if file is not None else url
+        logger.exception(f"Admin document ingestion failed for {source}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Could not ingest {source or 'document'}: "
+                f"{type(exc).__name__}: {str(exc)[:300]}"
+            ),
+        ) from exc
 
     return result
 
