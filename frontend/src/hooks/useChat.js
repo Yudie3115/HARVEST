@@ -75,6 +75,7 @@ export function useChat(
           content: msg.content,
           detectedLanguage: msg.detected_language,
           sources: msg.sources || [],
+          suggestedQuestions: msg.suggested_questions || [],
         }))
         setMessages([WELCOME, ...loaded])
         // Restore detected language from the most recent assistant message
@@ -109,12 +110,33 @@ export function useChat(
       setMessages((prev) => [
         ...prev,
         userMsg,
-        { id: assistantMsgId, role: 'assistant', content: '', sources: [], isStreaming: true },
+        {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: '',
+          sources: [],
+          suggestedQuestions: [],
+          isStreaming: true,
+          researchStage: 'preparing',
+        },
       ])
       setIsLoading(true)
 
       const streamIntoMessage = (activeSessionId) =>
         streamMessage(activeSessionId, text.trim(), languageOverride, modelPreference, token, {
+          onStatus: (event) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      researchStage: event.stage,
+                      researchSourceCount: event.source_count,
+                    }
+                  : m
+              )
+            )
+          },
           onToken: (token) => {
             setMessages((prev) =>
               prev.map((m) =>
@@ -132,7 +154,9 @@ export function useChat(
                       // Replace streamed English tokens with the (potentially translated) final answer
                       content: event.answer || m.content,
                       sources: event.sources || [],
+                      suggestedQuestions: event.suggested_questions || [],
                       isStreaming: false,
+                      researchStage: null,
                       noResults: event.no_results || false,
                     }
                   : m
@@ -145,7 +169,13 @@ export function useChat(
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, content: message, isError: true, isStreaming: false }
+                  ? {
+                      ...m,
+                      content: message,
+                      isError: true,
+                      isStreaming: false,
+                      researchStage: null,
+                    }
                   : m
               )
             )
@@ -160,7 +190,13 @@ export function useChat(
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
-                ? { ...m, content: '', isError: false, isStreaming: true }
+                ? {
+                    ...m,
+                    content: '',
+                    isError: false,
+                    isStreaming: true,
+                    researchStage: 'preparing',
+                  }
                 : m
             )
           )

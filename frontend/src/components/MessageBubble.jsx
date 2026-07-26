@@ -1,9 +1,17 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Sprout } from 'lucide-react'
 import SourcePill from './SourcePill'
+import ResearchProgress from './ResearchProgress'
+import SuggestedQuestions from './SuggestedQuestions'
 import { mdComponents } from '../lib/markdownComponents'
 
-export default function MessageBubble({ message, onShowSources }) {
+export default function MessageBubble({
+  message,
+  onShowSources,
+  onAskQuestion,
+  interactionsDisabled,
+}) {
   const isUser = message.role === 'user'
 
   if (isUser) {
@@ -28,38 +36,30 @@ export default function MessageBubble({ message, onShowSources }) {
   }
 
   return (
-    <div className="msg-enter" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-      <div
-        style={{
-          flexShrink: 0,
-          width: 28,
-          height: 28,
-          borderRadius: '50%',
-          background: '#1e3a28',
-          border: '1px solid #3d6b4f',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 14,
-          marginTop: 2,
-        }}
-      >
-        🌾
+    <article className="msg-enter assistant-response">
+      <div className="assistant-response__rail" aria-hidden="true">
+        <span className="assistant-response__mark">
+          <Sprout size={15} strokeWidth={1.7} />
+        </span>
       </div>
-      <div style={{ flex: 1, maxWidth: 'calc(100% - 38px)' }}>
+      <div className="assistant-response__body">
+        <div className="assistant-response__meta">
+          <span>Knowledge synthesis</span>
+          {message.sources?.length > 0 && (
+            <span>{message.sources.length} research reference{message.sources.length === 1 ? '' : 's'}</span>
+          )}
+        </div>
         <div
-          style={{
-            padding: '11px 16px',
-            borderRadius: '4px 16px 16px 16px',
-            background: message.isError ? '#1f1414' : message.noResults ? '#161a16' : '#191f1a',
-            border: `1px solid ${message.isError ? '#3d2020' : message.noResults ? '#202820' : '#252e25'}`,
-            color: message.isError ? '#c97d7d' : message.noResults ? '#6a7a6a' : '#d4cfc6',
-            fontSize: 15,
-            lineHeight: 1.6,
-            fontFamily: 'Outfit, system-ui, sans-serif',
-          }}
+          className={`assistant-response__content ${
+            message.isError ? 'assistant-response__content--error' : ''
+          } ${message.noResults ? 'assistant-response__content--empty' : ''}`}
         >
-          {message.isError ? (
+          {message.isStreaming && !message.content ? (
+            <ResearchProgress
+              stage={message.researchStage}
+              sourceCount={message.researchSourceCount}
+            />
+          ) : message.isError ? (
             message.content
           ) : (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -67,8 +67,20 @@ export default function MessageBubble({ message, onShowSources }) {
             </ReactMarkdown>
           )}
         </div>
+        {message.isStreaming && message.content && (
+          <ResearchProgress
+            compact
+            stage={message.researchStage || 'synthesizing'}
+            sourceCount={message.researchSourceCount}
+          />
+        )}
         <SourcePill sources={message.sources} onOpen={onShowSources} />
+        <SuggestedQuestions
+          questions={message.suggestedQuestions}
+          onAsk={onAskQuestion}
+          disabled={interactionsDisabled}
+        />
       </div>
-    </div>
+    </article>
   )
 }

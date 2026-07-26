@@ -11,7 +11,7 @@ const NAV = [
   { to: '/admin/overview',       label: 'Overview',        Icon: LayoutDashboard },
   { to: '/admin/documents',      label: 'Documents',       Icon: FileText        },
   { to: '/admin/search',         label: 'Search',          Icon: Search          },
-  { to: '/admin/qa',             label: 'Knowledge Q&A',   Icon: MessageSquare   },
+  { to: '/admin/qa',             label: 'Ask the Knowledge Base', Icon: MessageSquare },
   { to: '/admin/chat-quality',   label: 'Chat Quality',    Icon: BarChart2       },
   { to: '/admin/catalogue',      label: 'Q&A Catalogue',   Icon: Library         },
   { to: '/admin/access-codes',   label: 'Access Codes',    Icon: KeyRound        },

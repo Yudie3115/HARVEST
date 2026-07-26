@@ -50,6 +50,7 @@ export default function App() {
             messages={messages}
             isLoading={isLoading || sessionLoading}
             onShowSources={setActiveSources}
+            onAskQuestion={send}
           />
           <LanguageBar
             detectedLanguage={detectedLanguage}

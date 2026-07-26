@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
-import TypingIndicator from './TypingIndicator'
 
-export default function ChatWindow({ messages, isLoading, onShowSources }) {
+export default function ChatWindow({ messages, isLoading, onShowSources, onAskQuestion }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -28,9 +27,14 @@ export default function ChatWindow({ messages, isLoading, onShowSources }) {
         }}
       >
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} onShowSources={onShowSources} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            onShowSources={onShowSources}
+            onAskQuestion={onAskQuestion}
+            interactionsDisabled={isLoading}
+          />
         ))}
-        {isLoading && <TypingIndicator />}
         <div ref={bottomRef} style={{ height: 4 }} />
       </div>
     </div>

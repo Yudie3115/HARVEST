@@ -40,7 +40,7 @@ export default function QAPage() {
   return (
     <div className="p-6 font-admin max-w-[860px]">
       <div className="mb-5">
-        <h1 className="text-lg font-semibold text-admin-text">Knowledge Q&A</h1>
+        <h1 className="text-lg font-semibold text-admin-text">Ask the Knowledge Base</h1>
         <p className="text-xs text-admin-muted mt-0.5">Ask a question — the AI searches the knowledge base and synthesises a grounded answer</p>
       </div>
 

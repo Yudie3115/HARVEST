@@ -161,7 +161,7 @@ export async function sendMessage(sessionId, message, languageOverride = null, t
   return res.json()
 }
 
-export async function streamMessage(sessionId, message, languageOverride = null, modelPreference = null, token = null, { onToken, onDone, onError }) {
+export async function streamMessage(sessionId, message, languageOverride = null, modelPreference = null, token = null, { onToken, onStatus, onDone, onError }) {
   let res
   try {
     res = await fetch(`${BASE_URL}/chat/stream`, {
@@ -206,7 +206,8 @@ export async function streamMessage(sessionId, message, languageOverride = null,
         if (!part.startsWith('data: ')) continue
         try {
           const event = JSON.parse(part.slice(6))
-          if (event.type === 'token') onToken(event.content)
+          if (event.type === 'status') onStatus?.(event)
+          else if (event.type === 'token') onToken(event.content)
           else if (event.type === 'done') onDone(event)
           else if (event.type === 'error') {
             streamErrorStatus = event.status || (event.code === 'session_not_found' ? 404 : null)
