@@ -505,16 +505,31 @@ def semantic_search(
 # ---------------------------------------------------------------------------
 
 
+def _prefect_deployment_name(flow_name: str, deployment_prefix: str) -> str:
+    """Return the deployment created for the configured runtime environment."""
+    return f"{flow_name}/{deployment_prefix}-{settings.environment}"
+
+
 async def _trigger_prefect_deployment(deployment_name: str) -> dict:
-    url = f"{settings.prefect_api_url}/deployments/name/{deployment_name}/create_flow_run"
     headers = {}
     if settings.prefect_api_key:
         headers["Authorization"] = f"Bearer {settings.prefect_api_key}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, json={}, headers=headers)
-            r.raise_for_status()
-            return r.json()
+            deployment_response = await client.get(
+                f"{settings.prefect_api_url}/deployments/name/{deployment_name}",
+                headers=headers,
+            )
+            deployment_response.raise_for_status()
+            deployment_id = deployment_response.json()["id"]
+
+            run_response = await client.post(
+                f"{settings.prefect_api_url}/deployments/{deployment_id}/create_flow_run",
+                json={},
+                headers=headers,
+            )
+            run_response.raise_for_status()
+            return run_response.json()
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=f"Prefect error: {exc.response.text}")
     except Exception as exc:
@@ -523,13 +538,15 @@ async def _trigger_prefect_deployment(deployment_name: str) -> dict:
 
 @router.post("/crawl/full")
 async def trigger_full_crawl(_: str = Depends(require_admin)):
-    result = await _trigger_prefect_deployment("post_harvest_scraper/daily-scraper-production")
+    deployment_name = _prefect_deployment_name("post_harvest_scraper", "daily-scraper")
+    result = await _trigger_prefect_deployment(deployment_name)
     return {"status": "triggered", "flow_run_id": result.get("id")}
 
 
 @router.post("/crawl/incremental")
 async def trigger_incremental_crawl(_: str = Depends(require_admin)):
-    result = await _trigger_prefect_deployment("incremental_update/incremental-update-production")
+    deployment_name = _prefect_deployment_name("incremental_update", "incremental-update")
+    result = await _trigger_prefect_deployment(deployment_name)
     return {"status": "triggered", "flow_run_id": result.get("id")}
 
 

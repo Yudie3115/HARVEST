@@ -125,7 +125,9 @@ def deploy_flows(work_pool: str, env: str) -> None:
         },
     ]
 
-    for cfg in deployments:
+    failures = []
+    for deployment_config in deployments:
+        cfg = dict(deployment_config)
         flow_obj = cfg.pop("flow")
         name = cfg["name"]
         try:
@@ -141,6 +143,10 @@ def deploy_flows(work_pool: str, env: str) -> None:
             )
         except Exception as exc:
             logger.error(f"Failed to deploy '{name}': {exc}")
+            failures.append(name)
+
+    if failures:
+        raise RuntimeError(f"Failed to deploy Prefect flows: {', '.join(failures)}")
 
 
 def print_summary(work_pool: str, env: str) -> None:

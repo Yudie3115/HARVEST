@@ -1,0 +1,11 @@
+# Keep the worker on the same Prefect release as the Docker server.
+prefect==2.20.18
+griffe<1.0.0
+pydantic<2.11.0
+
+# Prefect 2 pins Click below 8.2; newer huggingface-hub releases require 8.4.
+huggingface-hub<1.0.0
+transformers<5.0.0
+
+# Discovery-flow dependency not needed by the lightweight API process.
+beautifulsoup4>=4.12.0,<5.0.0
