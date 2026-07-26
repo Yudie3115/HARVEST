@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Run the lightweight database-backed catalogue worker."""
+"""Run the lightweight database-backed catalogue worker.
+
+Launch this module from the repository root with:
+
+    python -m scripts.catalogue_worker
+
+Module execution keeps the repository root on ``sys.path`` so the ``src``
+package is importable in both local and container runtimes.
+"""
 import argparse
 import time
 

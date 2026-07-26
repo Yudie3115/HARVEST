@@ -65,7 +65,7 @@ local: check-local-services
 	api_pid=$$!; \
 	(cd frontend && pnpm run dev) & \
 	frontend_pid=$$!; \
-	poetry run python scripts/catalogue_worker.py & \
+	poetry run python -m scripts.catalogue_worker & \
 	worker_pid=$$!; \
 	wait -n $$api_pid $$frontend_pid $$worker_pid
 
@@ -76,7 +76,7 @@ frontend:
 	cd frontend && pnpm run dev
 
 catalogue-worker:
-	poetry run python scripts/catalogue_worker.py
+	poetry run python -m scripts.catalogue_worker
 
 start:
 	docker-compose up -d

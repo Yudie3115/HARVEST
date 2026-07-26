@@ -127,7 +127,7 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     container_name: postharvest-catalogue-worker
-    command: python scripts/catalogue_worker.py
+    command: python -m scripts.catalogue_worker
     env_file: .env
     environment:
       DATABASE_URL: postgresql://scraper:ph_scraper_pass@postgres:5432/postharvest_scraper
