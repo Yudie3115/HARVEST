@@ -186,7 +186,10 @@ def score_and_create_candidate(
 
     evaluation = llm_client.evaluate_catalogue_candidate(user.content, answer_en)
     llm_score = evaluation["worth_cataloguing_score"]
-    if settings.catalogue_mode == "manual" and llm_score < settings.catalogue_min_score:
+    # In manual mode the curator score is evidence for the human reviewer, not
+    # a hidden rejection gate. Auto mode has no human safety net, so it must
+    # enforce the configured minimum before publishing.
+    if settings.catalogue_mode == "auto" and llm_score < settings.catalogue_min_score:
         record_metric(
             db,
             CATALOGUE_CANDIDATE_METRIC,

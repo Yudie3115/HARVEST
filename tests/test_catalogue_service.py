@@ -145,6 +145,96 @@ def test_candidate_reloads_sources_by_vector_id_and_stores_chunk_primary_key():
     scorer.score.assert_called_once_with(assistant.content, [chunk.text])
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_entry"),
+    [
+        ("manual", True),
+        ("auto", False),
+    ],
+)
+def test_curator_threshold_is_visible_to_manual_review_but_enforced_for_auto(mode, expected_entry):
+    db = MagicMock()
+    session_id = uuid4()
+    message_id = uuid4()
+    created_at = datetime.now(timezone.utc)
+    assistant = ChatMessage(
+        id=message_id,
+        session_id=session_id,
+        role=MessageRoleEnum.assistant,
+        content="Dry maize before storage.",
+        created_at=created_at,
+    )
+    user = ChatMessage(
+        id=uuid4(),
+        session_id=session_id,
+        role=MessageRoleEnum.user,
+        content="How should I dry maize?",
+        created_at=created_at,
+    )
+    chunk = ContentChunk(
+        id=uuid4(),
+        document_id=uuid4(),
+        chunk_index=0,
+        text="Maize should be dried to a safe moisture content.",
+        vector_id=str(uuid4()),
+    )
+
+    existing_query = MagicMock()
+    existing_query.filter.return_value.first.return_value = None
+    user_query = MagicMock()
+    user_query.filter.return_value.order_by.return_value.first.return_value = user
+    chunks_query = MagicMock()
+    chunks_query.filter.return_value.all.return_value = [chunk]
+    duplicate_query = MagicMock()
+    duplicate_query.filter.return_value.all.return_value = []
+    db.query.side_effect = [existing_query, user_query, chunks_query, duplicate_query]
+    db.get.return_value = assistant
+
+    llm = MagicMock()
+    llm.evaluate_catalogue_candidate.return_value = {
+        "worth_cataloguing_score": 0.2,
+        "optimised_question": "How should maize be dried before storage?",
+    }
+    embeddings = MagicMock()
+    embeddings.embed.return_value = [0.1] * 3
+    scorer = MagicMock()
+    scorer.score.return_value = {"f1": 0.8}
+
+    with (
+        patch("src.api.services.catalogue_service.get_scorer", return_value=scorer),
+        patch("src.api.services.catalogue_service.settings") as config,
+        patch("src.api.services.catalogue_service.record_metric") as record_metric,
+    ):
+        config.bertscore_enabled = True
+        config.catalogue_min_faithfulness = 0.6
+        config.catalogue_mode = mode
+        config.catalogue_min_score = 0.7
+        config.embedding_dimension = 3
+        config.catalogue_duplicate_threshold = 0.9
+        result = score_and_create_candidate(
+            db,
+            {
+                "assistant_message_id": str(message_id),
+                "source_chunk_ids": [chunk.vector_id],
+            },
+            llm_client=llm,
+            embedding_client=embeddings,
+        )
+
+    if expected_entry:
+        assert isinstance(result, CatalogueEntry)
+        assert result.status == CatalogueStatusEnum.pending
+        assert result.llm_score == 0.2
+        embeddings.embed.assert_called_once()
+    else:
+        assert result is None
+        embeddings.embed.assert_not_called()
+        assert record_metric.call_args.kwargs["metadata"] == {
+            "outcome": "below_llm_score",
+            "llm_score": 0.2,
+        }
+
+
 def _pending_entry(**overrides) -> CatalogueEntry:
     defaults = dict(
         id=uuid4(),
@@ -217,7 +307,9 @@ def test_publish_entry_reuses_already_persisted_translations_on_retry():
 
     with patch("src.api.services.catalogue_service.settings") as config:
         config.embedding_dimension = 3
-        publish_entry(db, entry.id, translation_client=translations, catalogue_vector_client=vectors)
+        publish_entry(
+            db, entry.id, translation_client=translations, catalogue_vector_client=vectors
+        )
 
     called_languages = {call.args[1] for call in translations.translate_from_english.call_args_list}
     assert "lug" not in called_languages
