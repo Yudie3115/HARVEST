@@ -138,7 +138,6 @@ def build_calibration_report(db: Session, *, days: int = 30) -> dict[str, Any]:
             "ends_at": now.isoformat(),
         },
         "configuration": {
-            "chat_score_threshold": settings.chat_score_threshold,
             "chat_min_top_score": settings.chat_min_top_score,
             "catalogue_match_threshold": settings.catalogue_match_threshold,
             "catalogue_match_observation_threshold": (

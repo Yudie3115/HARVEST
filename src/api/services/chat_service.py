@@ -333,10 +333,13 @@ def process_chat(
     # 5. Embed and search
     # ------------------------------------------------------------------
     query_vector = embedding_client.embed(english_message)
+    # No per-chunk score filter here — candidates are gated as a whole by
+    # settings.chat_min_top_score below instead, so a paraphrase/synonym query
+    # whose best chunk barely clears the bar still gets its full top-k of
+    # supporting context rather than losing weaker (but still relevant) chunks.
     search_results = vector_db_client.search(
         query_vector=query_vector,
         top_k=5,
-        score_threshold=settings.chat_score_threshold,
     )
 
     chunks = [
@@ -582,7 +585,6 @@ def process_chat_stream(
         search_results = vector_db_client.search(
             query_vector=query_vector,
             top_k=5,
-            score_threshold=settings.chat_score_threshold,
         )
 
         chunks = [

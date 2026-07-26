@@ -170,8 +170,9 @@ def test_empty_history_when_no_prior_messages(mocks):
     assert result.answer == "Post-harvest loss is crop lost after harvest."
 
 
-def test_score_threshold_passed_to_search(mocks):
-    """The vector DB search must use settings.chat_score_threshold."""
+def test_search_has_no_per_chunk_score_filter(mocks):
+    """Retrieval must not drop candidate chunks via a raw per-chunk score cutoff —
+    relevance is gated once, on the top score, via settings.chat_min_top_score."""
     from src.api.services.chat_service import process_chat
 
     mocks[
@@ -183,7 +184,7 @@ def test_score_threshold_passed_to_search(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.35
+        mock_settings.chat_min_top_score = None
         mock_settings.bertscore_enabled = False
         process_chat(
             request=request,
@@ -195,7 +196,8 @@ def test_score_threshold_passed_to_search(mocks):
         )
 
     call_kwargs = mocks["vector_db"].search.call_args.kwargs
-    assert call_kwargs.get("score_threshold") == 0.35
+    assert "score_threshold" not in call_kwargs
+    assert call_kwargs.get("top_k") == 5
 
 
 def test_chat_model_options_use_effective_ollama_fallback():
@@ -253,7 +255,6 @@ def test_sources_include_score_and_snippet(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.0
         mock_settings.bertscore_enabled = False
         result = process_chat(
             request=request,
@@ -283,7 +284,6 @@ def test_no_results_skips_llm_and_sets_flag(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.3
         mock_settings.bertscore_enabled = False
         result = process_chat(
             request=request,
@@ -306,7 +306,6 @@ def test_min_top_score_blocks_nonstreaming_synthesis(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.3
         mock_settings.chat_min_top_score = 0.5
         result = process_chat(
             request=request,
@@ -335,7 +334,6 @@ def test_min_top_score_allows_nonstreaming_synthesis_above_threshold(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.3
         mock_settings.chat_min_top_score = 0.5
         result = process_chat(
             request=request,
@@ -364,7 +362,6 @@ def test_disabled_min_top_score_observes_without_blocking(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.0
         mock_settings.chat_min_top_score = None
         result = process_chat(
             request=request,
@@ -388,7 +385,6 @@ def test_min_top_score_blocks_stream_before_tokens(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.3
         mock_settings.chat_min_top_score = 0.5
         events = list(
             process_chat_stream(
@@ -418,7 +414,6 @@ def test_min_top_score_allows_stream_synthesis_above_threshold(mocks):
     request = _make_request(mocks["session_id"])
 
     with patch("src.api.services.chat_service.settings") as mock_settings:
-        mock_settings.chat_score_threshold = 0.3
         mock_settings.chat_min_top_score = 0.5
         events = list(
             process_chat_stream(

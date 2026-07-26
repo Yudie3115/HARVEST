@@ -1,7 +1,15 @@
 # Phase 5 calibration and operational hardening
 
-Phase 5 is evidence-driven. Production starts with `CATALOGUE_MODE=manual` and
-`CHAT_MIN_TOP_SCORE` unset. Neither value is changed automatically.
+Phase 5 is evidence-driven. Production starts with `CATALOGUE_MODE=manual`. Neither value is
+changed automatically.
+
+`CHAT_MIN_TOP_SCORE` ships with a conservative interim default (`0.30`) rather than unset.
+Live chat retrieval no longer filters candidate chunks by raw per-chunk embedding score before
+synthesis — that discarded valid paraphrase/synonym matches whose cosine similarity landed just
+under the old cutoff, even when the top-scoring chunk was clearly relevant. Relevance is now
+gated once, on the *top* score across the full (unfiltered) top-k, via `CHAT_MIN_TOP_SCORE`.
+Replace the interim `0.30` with an evidence-based value once the calibration report below has
+enough reviewed samples.
 
 ## Calibration evidence
 

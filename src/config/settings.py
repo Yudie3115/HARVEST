@@ -130,9 +130,13 @@ class Settings(BaseSettings):
     whatsapp_app_secret: str = Field(default="")
 
     # Chat retrieval
-    chat_score_threshold: float = Field(default=0.3)
-    # Disabled until Phase 5 score/outcome evidence supports a deployment value.
-    chat_min_top_score: float | None = Field(default=None)
+    # Interim conservative gate — retrieval no longer filters candidate chunks by
+    # raw embedding score before synthesis (that discarded valid paraphrase/synonym
+    # matches whose cosine similarity landed just under the old per-chunk cutoff).
+    # This value gates whether synthesis happens at all, based on the *top* score
+    # across the unfiltered top-k. Replace with an evidence-based value once the
+    # Phase 5 calibration report (/admin/catalogue/calibration) has enough data.
+    chat_min_top_score: float | None = Field(default=0.30)
 
     # Q&A catalogue
     catalogue_collection_name: str = Field(default="postharvest_catalogue")
