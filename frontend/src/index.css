@@ -749,6 +749,22 @@ select {
   padding-right: 24px !important;
 }
 
+/* Native admin select menus need explicit colors across browser/OS themes. */
+.admin-select {
+  color: #f4f4f5;
+  background-color: #09090b;
+  color-scheme: dark;
+}
+
+.admin-select option {
+  color: #f4f4f5;
+  background-color: #111111;
+}
+
+.admin-select option:disabled {
+  color: #71717a;
+}
+
 /* Textarea */
 textarea {
   field-sizing: content;
