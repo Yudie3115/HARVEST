@@ -89,6 +89,9 @@ export const adminApi = {
   triggerCrawl: (type) =>
     request('POST', type === 'full' ? '/admin/crawl/full' : '/admin/crawl/incremental'),
 
+  reprocessStuck: () =>
+    request('POST', '/admin/documents/reprocess-stuck'),
+
   async ingestFile(file, title, siteName) {
     const fd = new FormData()
     fd.append('file', file)

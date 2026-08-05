@@ -227,6 +227,66 @@ def incremental_update_flow(site_name: Optional[str] = None) -> Dict:
     }
 
 
+STUCK_STATUSES = [
+    DocumentStatus.DISCOVERED,
+    DocumentStatus.QUEUED,
+    DocumentStatus.PROCESSING,
+    DocumentStatus.FAILED,
+]
+
+
+def reset_stuck_documents(limit: int = 200) -> List[Dict]:
+    """
+    Find documents that never finished processing (DISCOVERED, QUEUED,
+    PROCESSING) or that previously FAILED, and reset them to DISCOVERED so
+    the processing flow will pick them up.
+
+    PROCESSED and SKIPPED documents are left untouched — SKIPPED reflects a
+    deliberate outcome (low relevance score or no extractable content), and
+    re-running it would just repeat the same LLM call for the same result.
+
+    Returns:
+        List of dicts with keys: id, url, site_name — ready to pass to
+        process_documents_batch().
+    """
+    db = PostgresClient()
+    stuck_docs = db.get_documents(status=STUCK_STATUSES, limit=limit)
+
+    for doc in stuck_docs:
+        db.update_document_status(doc.id, DocumentStatus.DISCOVERED)
+
+    if stuck_docs:
+        logger.info(f"Reset {len(stuck_docs)} stuck documents for reprocessing")
+
+    return [
+        {"id": str(doc.id), "url": doc.url, "site_name": doc.site_name} for doc in stuck_docs
+    ]
+
+
+@flow(name="reprocess_stuck")
+def reprocess_stuck_flow(limit: int = 200) -> Dict:
+    """
+    Retry processing for documents stuck in a non-terminal state or that
+    previously failed. See reset_stuck_documents() for exactly which
+    statuses are included.
+
+    Args:
+        limit: Maximum number of documents to retry
+
+    Returns:
+        Summary dict
+    """
+    documents = reset_stuck_documents(limit=limit)
+    if not documents:
+        logger.info("No stuck documents to reprocess")
+        return {"reprocessed": 0, "total_retried": 0}
+
+    results = process_documents_batch(documents)
+    processed = sum(1 for r in results if r.get("status") == "processed")
+
+    return {"reprocessed": processed, "total_retried": len(documents)}
+
+
 @flow(name="reprocess_failed")
 def reprocess_failed_flow(limit: int = 50) -> Dict:
     """

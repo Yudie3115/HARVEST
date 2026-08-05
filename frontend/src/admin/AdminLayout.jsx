@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, FileText, Search, MessageSquare,
-  Settings, Plus, LogOut, Loader2, BarChart2, Library, KeyRound,
+  Settings, Plus, LogOut, Loader2, BarChart2, Library, KeyRound, RotateCcw,
 } from 'lucide-react'
 import { adminApi } from './api'
 import { cn } from '../lib/utils'
@@ -30,6 +30,25 @@ export default function AdminLayout() {
     try {
       await adminApi.triggerCrawl(type)
       setCrawlMsg({ type: 'ok', text: type === 'full' ? 'Full crawl triggered!' : 'Incremental update triggered!' })
+    } catch (e) {
+      setCrawlMsg({ type: 'err', text: e.message })
+    } finally {
+      setCrawlLoading(null)
+      setTimeout(() => setCrawlMsg(null), 4000)
+    }
+  }
+
+  async function reprocessStuck() {
+    setCrawlLoading('reprocess')
+    setCrawlMsg(null)
+    try {
+      const { queued } = await adminApi.reprocessStuck()
+      setCrawlMsg({
+        type: 'ok',
+        text: queued > 0
+          ? `Reprocessing ${queued} stuck document${queued === 1 ? '' : 's'}…`
+          : 'No stuck documents found.',
+      })
     } catch (e) {
       setCrawlMsg({ type: 'err', text: e.message })
     } finally {
@@ -92,6 +111,17 @@ export default function AdminLayout() {
               ? <Loader2 size={12} className="animate-spin" />
               : <span className="text-xs">↻</span>}
             Incremental Update
+          </button>
+          <button
+            onClick={reprocessStuck}
+            disabled={crawlLoading !== null}
+            title="Retry documents stuck in discovered, queued, processing, or failed"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-admin-border text-admin-muted text-[12px] hover:bg-admin-hover hover:text-admin-text transition-colors disabled:opacity-50"
+          >
+            {crawlLoading === 'reprocess'
+              ? <Loader2 size={12} className="animate-spin" />
+              : <RotateCcw size={12} />}
+            Reprocess Stuck Docs
           </button>
           {crawlMsg && (
             <p className={cn(

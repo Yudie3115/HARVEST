@@ -13,6 +13,7 @@ Endpoints:
   POST /admin/crawl/full             → trigger Prefect full crawl
   POST /admin/crawl/incremental      → trigger Prefect incremental update
   POST /admin/documents/ingest       → file or URL ingestion
+  POST /admin/documents/reprocess-stuck → retry documents stuck in a non-terminal or failed status
   GET  /admin/chat-quality           → paginated scored chat messages
   GET  /admin/chat-quality/stats     → aggregate faithfulness stats
 """
@@ -24,7 +25,7 @@ from uuid import UUID
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel
@@ -683,6 +684,28 @@ async def ingest_document(
         ) from exc
 
     return result
+
+
+@router.post("/documents/reprocess-stuck")
+async def reprocess_stuck_documents(
+    background_tasks: BackgroundTasks,
+    limit: int = 200,
+    _: str = Depends(require_admin),
+):
+    """
+    Reset documents stuck in DISCOVERED, QUEUED, PROCESSING, or FAILED back
+    to DISCOVERED and reprocess them. Resetting happens immediately; the
+    actual download/extract/classify/embed pipeline runs in the background
+    so this returns without waiting for it to finish.
+    """
+    from src.flows.orchestration import reset_stuck_documents
+    from src.flows.processing import process_documents_batch
+
+    documents = await asyncio.to_thread(reset_stuck_documents, limit=limit)
+    if documents:
+        background_tasks.add_task(process_documents_batch, documents)
+
+    return {"queued": len(documents)}
 
 
 # ---------------------------------------------------------------------------

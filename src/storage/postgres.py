@@ -2,7 +2,7 @@
 PostgreSQL database client
 """
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 from uuid import UUID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -185,18 +185,21 @@ class PostgresClient:
     def get_documents(
         self,
         site_name: str = None,
-        status: DocumentStatus = None,
+        status: Union[DocumentStatus, List[DocumentStatus]] = None,
         limit: int = 100
     ) -> List[Document]:
-        """Get documents with filters"""
+        """Get documents with filters. `status` accepts a single status or a list."""
         with self.get_session() as session:
             query = session.query(Document)
-            
+
             if site_name:
                 query = query.filter(Document.site_name == site_name)
             if status:
-                query = query.filter(Document.status == status)
-            
+                if isinstance(status, (list, tuple, set)):
+                    query = query.filter(Document.status.in_(status))
+                else:
+                    query = query.filter(Document.status == status)
+
             return query.limit(limit).all()
     
     def update_document_status(
