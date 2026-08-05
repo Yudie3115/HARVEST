@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from loguru import logger  # noqa: E402
 from src.storage.postgres import PostgresClient  # noqa: E402
-from src.storage.models import Base  # noqa: E402
+from src.storage.migrations import upgrade_to_head  # noqa: E402
 
 
 def main():
@@ -19,12 +19,11 @@ def main():
 
     db = None
     try:
-        # Create database client
-        db = PostgresClient()
+        # Apply all Alembic migrations (creates tables on a fresh DB,
+        # applies any pending column/index changes on an existing one)
+        upgrade_to_head()
 
-        # Create all tables
-        logger.info("Creating tables...")
-        db.create_tables()
+        db = PostgresClient()
 
         # Verify tables
         from sqlalchemy import inspect

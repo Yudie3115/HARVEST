@@ -46,9 +46,12 @@ async def lifespan(app: FastAPI):
     from src.translation.client import TranslationClient
     from src.api.services.whatsapp_service import WhatsAppService
 
+    # Bring the schema up to date (creates tables and applies any pending
+    # column/index changes — safe to run on every startup)
+    from src.storage.migrations import upgrade_to_head
+    upgrade_to_head()
+
     postgres_client = PostgresClient()
-    # Ensure chat tables exist (no-op if already present)
-    postgres_client.create_tables()
 
     app.state.postgres_client = postgres_client
     app.state.llm_client = LLMClient()

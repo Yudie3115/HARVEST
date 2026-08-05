@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install install-local setup setup-local dev-local check-local-services local api frontend catalogue-worker start stop restart logs clean test
+.PHONY: help install install-local setup setup-local dev-local check-local-services local api frontend catalogue-worker start stop restart logs clean test init-db migrate
 
 help:
 	@echo "Post-Harvest Knowledge Scraper - Development Commands"
@@ -23,7 +23,8 @@ help:
 	@echo "  make logs             View Docker logs"
 	@echo ""
 	@echo "Database:"
-	@echo "  make init-db          Initialize database"
+	@echo "  make init-db          Initialize database (runs migrations)"
+	@echo "  make migrate          Apply pending Alembic migrations"
 	@echo "  make db-shell         Open PostgreSQL shell"
 	@echo ""
 	@echo "Development:"
@@ -92,6 +93,9 @@ logs:
 
 init-db:
 	poetry run python scripts/init_db.py
+
+migrate:
+	poetry run alembic upgrade head
 
 db-shell:
 	docker exec -it postharvest-postgres psql -U scraper -d postharvest_scraper
