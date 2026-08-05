@@ -16,6 +16,7 @@ Endpoints:
   GET  /admin/chat-quality           → paginated scored chat messages
   GET  /admin/chat-quality/stats     → aggregate faithfulness stats
 """
+import asyncio
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -654,14 +655,16 @@ async def ingest_document(
                     status_code=413,
                     detail=f"{file.filename or 'Document'} exceeds the 50 MB upload limit.",
                 )
-            result = ingest_manual_document(
+            result = await asyncio.to_thread(
+                ingest_manual_document,
                 content=content,
                 filename=file.filename,
                 title=title or None,
                 site_name=site_name or "manual",
             )
         else:
-            result = ingest_manual_document(
+            result = await asyncio.to_thread(
+                ingest_manual_document,
                 url=url,
                 title=title or None,
                 site_name=site_name or "manual",
