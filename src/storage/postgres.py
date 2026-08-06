@@ -3,8 +3,9 @@ PostgreSQL database client
 """
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Union
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import sessionmaker, Session
 from loguru import logger
 
@@ -264,28 +265,50 @@ class PostgresClient:
         document_id: UUID,
         classification_data: Dict
     ) -> DocumentClassification:
-        """Create document classification"""
+        """Create or replace a document's classification.
+
+        Upsert rather than plain insert: document_classifications.document_id is
+        unique, and documents are re-processed routinely (admin
+        reprocess-stuck, Prefect retries, re-crawls). A second pass must
+        overwrite the earlier classification instead of raising
+        duplicate key value violates unique constraint
+        "document_classifications_document_id_key".
+
+        ON CONFLICT is used in preference to a read-then-write so that
+        concurrent workers processing the same document cannot race.
+        """
+        values = {
+            'topics': classification_data.get('topics', []),
+            'crops': classification_data.get('crops', []),
+            'regions': classification_data.get('regions', []),
+            'relevance_score': classification_data.get('relevance_score', 0),
+            'document_category': classification_data.get('document_type'),
+            'target_audience': classification_data.get('target_audience', []),
+            'language': classification_data.get('language', 'en'),
+            'summary': classification_data.get('summary'),
+            'key_practices': classification_data.get('key_practices', []),
+            'actionable': classification_data.get('actionable', False),
+            'has_data': classification_data.get('has_data', False),
+            'llm_model': classification_data.get('llm_model', 'gpt-4o-mini'),
+            'llm_metadata': classification_data.get('llm_metadata', {}),
+            'classified_at': datetime.utcnow(),
+        }
         with self.get_session() as session:
-            classification = DocumentClassification(
-                document_id=document_id,
-                topics=classification_data.get('topics', []),
-                crops=classification_data.get('crops', []),
-                regions=classification_data.get('regions', []),
-                relevance_score=classification_data.get('relevance_score', 0),
-                document_category=classification_data.get('document_type'),
-                target_audience=classification_data.get('target_audience', []),
-                language=classification_data.get('language', 'en'),
-                summary=classification_data.get('summary'),
-                key_practices=classification_data.get('key_practices', []),
-                actionable=classification_data.get('actionable', False),
-                has_data=classification_data.get('has_data', False),
-                llm_model=classification_data.get('llm_model', 'gpt-4o-mini'),
-                llm_metadata=classification_data.get('llm_metadata', {})
+            stmt = (
+                pg_insert(DocumentClassification)
+                .values(id=uuid4(), document_id=document_id, **values)
+                .on_conflict_do_update(
+                    index_elements=[DocumentClassification.document_id],
+                    set_=values,
+                )
             )
-            session.add(classification)
+            session.execute(stmt)
             session.commit()
-            session.refresh(classification)
-            return classification
+            return (
+                session.query(DocumentClassification)
+                .filter(DocumentClassification.document_id == document_id)
+                .one()
+            )
     
     # Statistics methods
     
