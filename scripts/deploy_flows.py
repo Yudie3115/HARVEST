@@ -88,6 +88,7 @@ def deploy_flows(work_pool: str, env: str) -> None:
         main_scraper_flow,
         incremental_update_flow,
         reprocess_failed_flow,
+        reprocess_stuck_flow,
     )
 
     deployments = [
@@ -123,6 +124,18 @@ def deploy_flows(work_pool: str, env: str) -> None:
             ),
             "parameters": {"limit": 100},
         },
+        {
+            # No schedule — triggered on demand by the Admin UI
+            # (POST /admin/documents/reprocess-stuck).
+            "flow": reprocess_stuck_flow,
+            "name": f"reprocess-stuck-{env}",
+            "tags": [env, "manual", "maintenance"],
+            "description": (
+                "Retry documents stuck in DISCOVERED/QUEUED/PROCESSING or FAILED "
+                "– triggered from the Admin UI"
+            ),
+            "parameters": {"limit": 200},
+        },
     ]
 
     failures = []
@@ -137,9 +150,10 @@ def deploy_flows(work_pool: str, env: str) -> None:
                 **cfg,
             )
             deployment_id = deployment.apply()
+            schedule = cfg.get("schedule")
             logger.info(
-                f"Deployed '{name}' "
-                f"(id={deployment_id}, schedule={cfg['schedule'].cron})"
+                f"Deployed '{name}' (id={deployment_id}, "
+                f"schedule={schedule.cron if schedule else 'on demand'})"
             )
         except Exception as exc:
             logger.error(f"Failed to deploy '{name}': {exc}")
@@ -161,6 +175,9 @@ def print_summary(work_pool: str, env: str) -> None:
         f"    daily-scraper-{env:<12} → daily  02:00 UTC",
         f"    incremental-update-{env:<7} → hourly",
         f"    reprocess-failed-{env:<9} → weekly 03:00 UTC (Sunday)",
+        "",
+        "  On-demand deployments:",
+        f"    reprocess-stuck-{env:<10} → triggered from the Admin UI",
         "",
         "  Start a worker to execute flows:",
         f"    prefect worker start --pool {work_pool}",

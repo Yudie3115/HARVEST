@@ -42,13 +42,11 @@ export default function AdminLayout() {
     setCrawlLoading('reprocess')
     setCrawlMsg(null)
     try {
-      const { queued } = await adminApi.reprocessStuck()
-      setCrawlMsg({
-        type: 'ok',
-        text: queued > 0
-          ? `Reprocessing ${queued} stuck document${queued === 1 ? '' : 's'}…`
-          : 'No stuck documents found.',
-      })
+      // The endpoint now hands off to Prefect, so it returns a flow_run_id
+      // immediately rather than a count — the document total is only known
+      // once the flow starts.
+      await adminApi.reprocessStuck()
+      setCrawlMsg({ type: 'ok', text: 'Reprocessing stuck documents triggered!' })
     } catch (e) {
       setCrawlMsg({ type: 'err', text: e.message })
     } finally {

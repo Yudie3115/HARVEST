@@ -25,7 +25,7 @@ from uuid import UUID
 
 import httpx
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel
@@ -590,7 +590,10 @@ def _prefect_deployment_name(flow_name: str, deployment_prefix: str) -> str:
     return f"{flow_name}/{deployment_prefix}-{settings.environment}"
 
 
-async def _trigger_prefect_deployment(deployment_name: str) -> dict:
+async def _trigger_prefect_deployment(
+    deployment_name: str,
+    parameters: Optional[dict] = None,
+) -> dict:
     headers = {}
     if settings.prefect_api_key:
         headers["Authorization"] = f"Bearer {settings.prefect_api_key}"
@@ -605,7 +608,7 @@ async def _trigger_prefect_deployment(deployment_name: str) -> dict:
 
             run_response = await client.post(
                 f"{settings.prefect_api_url}/deployments/{deployment_id}/create_flow_run",
-                json={},
+                json={"parameters": parameters} if parameters else {},
                 headers=headers,
             )
             run_response.raise_for_status()
@@ -688,24 +691,25 @@ async def ingest_document(
 
 @router.post("/documents/reprocess-stuck")
 async def reprocess_stuck_documents(
-    background_tasks: BackgroundTasks,
     limit: int = 200,
     _: str = Depends(require_admin),
 ):
     """
     Reset documents stuck in DISCOVERED, QUEUED, PROCESSING, or FAILED back
-    to DISCOVERED and reprocess them. Resetting happens immediately; the
-    actual download/extract/classify/embed pipeline runs in the background
-    so this returns without waiting for it to finish.
+    to DISCOVERED and reprocess them.
+
+    The work is handed to Prefect rather than run here. Previously this
+    executed process_documents_batch in-process via BackgroundTasks, which
+    ran the full download/extract/classify/embed pipeline inside the web
+    container — starving the connection pool (max_overflow=0) and holding
+    the request open past the proxy's read timeout, so the browser saw
+    "Failed to fetch". Full Crawl and Incremental Update already delegate to
+    Prefect; this now matches them and returns a flow_run_id that can be
+    polled for progress.
     """
-    from src.flows.orchestration import reset_stuck_documents
-    from src.flows.processing import process_documents_batch
-
-    documents = await asyncio.to_thread(reset_stuck_documents, limit=limit)
-    if documents:
-        background_tasks.add_task(process_documents_batch, documents)
-
-    return {"queued": len(documents)}
+    deployment_name = _prefect_deployment_name("reprocess_stuck", "reprocess-stuck")
+    result = await _trigger_prefect_deployment(deployment_name, {"limit": limit})
+    return {"status": "triggered", "flow_run_id": result.get("id")}
 
 
 # ---------------------------------------------------------------------------
