@@ -108,6 +108,21 @@ compile-time, not runtime):
 dokku docker-options:add postharvest-chat build '--build-arg VITE_API_URL=https://api.yourdomain.com'
 ```
 
+### Raise the upload size limit
+
+Dokku's nginx defaults to `client_max_body_size 1m`. The Add Document feature
+accepts files up to 50 MB (`_MAX_DOCUMENT_UPLOAD_BYTES` in
+`src/api/routes/admin.py`), so without this any upload over 1 MB is rejected by
+the proxy before it reaches the API — the app's own 413 message never appears:
+
+```bash
+dokku nginx:set postharvest-api client-max-body-size 50m
+dokku proxy:build-config postharvest-api
+```
+
+`nginx:set` only records the value; `proxy:build-config` regenerates the vhost and
+is what actually applies it. No redeploy or container restart is needed.
+
 ---
 
 ## 3. Provision the stateful services (before the first deploy)
@@ -449,6 +464,17 @@ attach-post-create` and remove the `docker-options` entry.
 
 The CORS message is a symptom, not the cause: nginx's own 502 page has no CORS
 headers, so the browser blames CORS. `API_CORS_ORIGINS` is almost certainly fine.
+
+### Uploads over 1 MB fail in Add Document
+
+Dokku's nginx caps request bodies at 1 MB by default, and rejects the upload
+before it reaches the API, so the app's own 50 MB limit and its 413 message never
+come into play. Raise it — see step 2:
+
+```bash
+dokku nginx:set postharvest-api client-max-body-size 50m
+dokku proxy:build-config postharvest-api
+```
 
 ### `network <name> not found` during deploy
 
