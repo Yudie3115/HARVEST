@@ -18,10 +18,13 @@ Endpoints:
   GET  /admin/chat-quality/stats     → aggregate faithfulness stats
 """
 import asyncio
+import hashlib
+import mimetypes
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import jwt
@@ -52,6 +55,8 @@ from src.storage.models import (
 _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_HOURS = 8
 _MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+_UPLOAD_STAGING_PREFIX = "staging/"
 _DELETABLE_DOCUMENT_STATUSES = {
     DocumentStatus.PROCESSED,
     DocumentStatus.FAILED,
@@ -638,6 +643,75 @@ async def trigger_incremental_crawl(_: str = Depends(require_admin)):
 # ---------------------------------------------------------------------------
 
 
+def _stage_upload(stream, filename: Optional[str]) -> tuple[str, str]:
+    """Hash an upload and stream it to a MinIO staging object.
+
+    Reads in fixed-size chunks so peak memory is one chunk regardless of file
+    size — the previous `await file.read(...)` held the entire document, and
+    twenty concurrent uploads were enough to OOM the container.
+
+    Returns:
+        (staging object name, sha256 hex digest)
+    """
+    from src.storage.minio_client import MinIOClient
+
+    digest = hashlib.sha256()
+    size = 0
+    stream.seek(0)
+    while chunk := stream.read(_UPLOAD_CHUNK_BYTES):
+        size += len(chunk)
+        if size > _MAX_DOCUMENT_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{filename or 'Document'} exceeds the 50 MB upload limit.",
+            )
+        digest.update(chunk)
+    stream.seek(0)
+
+    if size == 0:
+        raise HTTPException(
+            status_code=400, detail=f"{filename or 'Document'} is empty."
+        )
+
+    suffix = Path(filename or "").suffix
+    object_name = f"{_UPLOAD_STAGING_PREFIX}{uuid4()}{suffix}"
+    mime_type, _ = mimetypes.guess_type(filename or "")
+    MinIOClient().upload_stream(
+        stream,
+        length=size,
+        object_name=object_name,
+        content_type=mime_type or "application/octet-stream",
+    )
+    return object_name, digest.hexdigest()
+
+
+def _find_duplicate_by_hash(file_hash: str) -> Optional[dict]:
+    """Return the ingest response for an already-stored document, or None."""
+    from src.storage.postgres import PostgresClient
+
+    existing = PostgresClient().get_document_by_file_hash(file_hash)
+    if existing is None:
+        return None
+    return {
+        "document_id": str(existing.id),
+        "url": existing.url,
+        "status": "duplicate",
+        "chunks": 0,
+        "reason": "duplicate_content",
+        "existing_title": existing.title,
+    }
+
+
+def _discard_staged_upload(object_name: str) -> None:
+    """Remove a staging object whose document turned out to be a duplicate."""
+    from src.storage.minio_client import MinIOClient
+
+    try:
+        MinIOClient().delete_object(object_name)
+    except Exception as exc:
+        logger.warning(f"Could not delete staging object {object_name}: {exc}")
+
+
 @router.post("/documents/ingest")
 async def ingest_document(
     file: Optional[UploadFile] = File(None),
@@ -650,29 +724,34 @@ async def ingest_document(
         raise HTTPException(status_code=400, detail="Provide either a file upload or a url field.")
 
     try:
-        from src.flows.manual_ingestion import ingest_manual_document
-
         if file is not None:
-            content = await file.read(_MAX_DOCUMENT_UPLOAD_BYTES + 1)
-            if len(content) > _MAX_DOCUMENT_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"{file.filename or 'Document'} exceeds the 50 MB upload limit.",
-                )
-            result = await asyncio.to_thread(
-                ingest_manual_document,
-                content=content,
-                filename=file.filename,
-                title=title or None,
-                site_name=site_name or "manual",
+            staging_object, file_hash = await asyncio.to_thread(
+                _stage_upload, file.file, file.filename
             )
+
+            # Duplicate detection stays synchronous — it is a single indexed
+            # lookup and the immediate feedback is worth far more than the
+            # milliseconds it costs.
+            duplicate = await asyncio.to_thread(_find_duplicate_by_hash, file_hash)
+            if duplicate is not None:
+                await asyncio.to_thread(_discard_staged_upload, staging_object)
+                return duplicate
+
+            parameters = {
+                "staging_object": staging_object,
+                "filename": file.filename,
+                "title": title or None,
+                "site_name": site_name or "manual",
+            }
         else:
-            result = await asyncio.to_thread(
-                ingest_manual_document,
-                url=url,
-                title=title or None,
-                site_name=site_name or "manual",
-            )
+            parameters = {
+                "url": url,
+                "title": title or None,
+                "site_name": site_name or "manual",
+            }
+
+        deployment_name = _prefect_deployment_name("ingest_manual_upload", "ingest-upload")
+        run = await _trigger_prefect_deployment(deployment_name, parameters)
     except HTTPException:
         raise
     except Exception as exc:
@@ -686,7 +765,12 @@ async def ingest_document(
             ),
         ) from exc
 
-    return result
+    return {
+        "status": "queued",
+        "flow_run_id": run.get("id"),
+        "filename": file.filename if file is not None else None,
+        "url": url or None,
+    }
 
 
 @router.post("/documents/reprocess-stuck")

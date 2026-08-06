@@ -90,6 +90,7 @@ def deploy_flows(work_pool: str, env: str) -> None:
         reprocess_failed_flow,
         reprocess_stuck_flow,
     )
+    from src.flows.manual_ingestion import ingest_manual_upload_flow
 
     deployments = [
         {
@@ -136,6 +137,18 @@ def deploy_flows(work_pool: str, env: str) -> None:
             ),
             "parameters": {"limit": 200},
         },
+        {
+            # No schedule — one flow run per document submitted through
+            # POST /admin/documents/ingest.
+            "flow": ingest_manual_upload_flow,
+            "name": f"ingest-upload-{env}",
+            "tags": [env, "manual", "ingestion"],
+            "description": (
+                "Ingest a document uploaded or linked from the Admin UI "
+                "– one run per document"
+            ),
+            "parameters": {},
+        },
     ]
 
     failures = []
@@ -178,6 +191,7 @@ def print_summary(work_pool: str, env: str) -> None:
         "",
         "  On-demand deployments:",
         f"    reprocess-stuck-{env:<10} → triggered from the Admin UI",
+        f"    ingest-upload-{env:<12} → one run per Admin document upload",
         "",
         "  Start a worker to execute flows:",
         f"    prefect worker start --pool {work_pool}",

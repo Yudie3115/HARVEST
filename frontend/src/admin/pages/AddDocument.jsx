@@ -18,6 +18,22 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024
 function ResultBanner({ result, onDismiss, label }) {
   if (!result) return null
 
+  // Ingestion now runs in the Prefect worker rather than in the API process,
+  // so a successful submission returns immediately with a flow_run_id and the
+  // outcome (processed / skipped / relevance score) is only known later.
+  if (result.status === 'queued') {
+    return (
+      <div className="flex items-start gap-2.5 rounded-md border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-[12px] text-blue-300">
+        <CheckCircle size={14} className="mt-0.5 flex-shrink-0" />
+        <div>
+          {label && <span className="font-medium">{label}: </span>}
+          Queued for processing. It will appear in Documents once indexing finishes.
+        </div>
+        {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-blue-500 hover:text-blue-300">×</button>}
+      </div>
+    )
+  }
+
   if (result.status === 'processed') {
     const score = typeof result.relevance_score === 'number'
       ? result.relevance_score.toFixed(1) : 'N/A'

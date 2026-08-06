@@ -121,6 +121,42 @@ class MinIOClient:
             logger.error(f"Error uploading bytes: {e}")
             raise
     
+    def upload_stream(
+        self,
+        stream,
+        length: int,
+        object_name: str,
+        content_type: str = "application/octet-stream"
+    ) -> str:
+        """
+        Upload from a file-like object without reading it into memory.
+
+        Used for Admin uploads, where holding the whole file in the web
+        process is what made concurrent uploads exhaust the container.
+
+        Args:
+            stream:       File-like object positioned at the start
+            length:       Total size in bytes (must be known)
+            object_name:  Name in bucket
+            content_type: MIME type
+
+        Returns:
+            Object path in MinIO
+        """
+        try:
+            self.client.put_object(
+                self.bucket,
+                object_name,
+                stream,
+                length=length,
+                content_type=content_type
+            )
+            logger.debug(f"Streamed {length} bytes to {object_name}")
+            return object_name
+        except S3Error as e:
+            logger.error(f"Error streaming upload: {e}")
+            raise
+
     def download_file(self, object_name: str, file_path: str):
         """
         Download a file from MinIO

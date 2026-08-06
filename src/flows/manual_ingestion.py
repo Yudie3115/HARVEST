@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
+from loguru import logger
+from prefect import flow
+
 from src.config.settings import settings
 from src.flows.processing import (
     _detect_document_type,
@@ -292,3 +295,54 @@ def ingest_manual_document(
         ),
     )
     return summary
+
+
+@flow(name="ingest_manual_upload")
+def ingest_manual_upload_flow(
+    staging_object: Optional[str] = None,
+    filename: Optional[str] = None,
+    url: Optional[str] = None,
+    title: Optional[str] = None,
+    site_name: str = "manual",
+) -> dict:
+    """
+    Worker-side entry point for Admin document ingestion.
+
+    The API used to call ingest_manual_document() directly via
+    asyncio.to_thread, which held the whole upload in memory and ran
+    extract/classify/chunk/embed inside the web container — twenty
+    concurrent uploads were enough to get uvicorn OOM-killed.
+
+    The API now streams the upload to a staging object in MinIO and
+    triggers this flow, so the bytes are only ever resident in the worker,
+    one document at a time.
+
+    Args:
+        staging_object: MinIO object holding the uploaded bytes. Mutually
+            exclusive with ``url``.
+        filename:       Original filename, required with ``staging_object``.
+        url:            Remote document to download instead of an upload.
+        title:          Optional title override.
+        site_name:      Document source label.
+    """
+    minio = MinIOClient()
+
+    content = minio.get_object(staging_object) if staging_object else None
+    try:
+        return ingest_manual_document(
+            content=content,
+            filename=filename,
+            url=url,
+            title=title,
+            site_name=site_name,
+        )
+    finally:
+        if staging_object:
+            # Best effort — the document is already ingested by this point, so
+            # a stranded staging object must not fail the flow run.
+            try:
+                minio.delete_object(staging_object)
+            except Exception as exc:
+                logger.warning(
+                    f"Could not delete staging object {staging_object}: {exc}"
+                )
