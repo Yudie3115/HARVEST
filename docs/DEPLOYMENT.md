@@ -634,7 +634,7 @@ schema, but existing documents and chat history must be migrated separately.
 | `EMBEDDING_PROVIDER` | No | `openai` (default) or `local` (needs +2 GB RAM) |
 | `LLM_PROVIDER` | No | `openai` (default) or `ollama` |
 | `BERTSCORE_ENABLED` | No | Answer scoring; `BERTSCORE_MODEL` selects the model |
-| `CRAWL_UNVERIFY_SSL` | No | Comma-separated site names to skip TLS verification |
+| `CRAWL_UNVERIFY_SSL` | No | Comma-separated site names to skip TLS verification — set it in the Compose `.env`, see below |
 | `WHATSAPP_TOKEN` | No | Webhook inactive if empty |
 | `WHATSAPP_PHONE_NUMBER_ID` | No | WhatsApp |
 | `WHATSAPP_VERIFY_TOKEN` | No | Any string you choose |
@@ -646,3 +646,35 @@ schema, but existing documents and chat history must be migrated separately.
 Defaults in `src/config/settings.py` are **local development values**
 (`localhost:...`). They are correct for `make local` and wrong for every
 containerised deployment, which is why each endpoint must be set explicitly above.
+
+### Two environments, not one
+
+`dokku config:set` configures the **API and frontend containers only**. The Prefect
+worker — which runs every crawl — reads `/opt/postharvest/.env` through Compose's
+`env_file`. The two are unrelated, and a setting present in one is invisible to the
+other.
+
+Anything the crawl pipeline reads must be in the Compose `.env`:
+
+| Variable | Needed by | Symptom if only set in Dokku |
+|---|---|---|
+| `ENVIRONMENT` | worker (deployment names) | `{"detail":"Deployment not found"}` — the worker registers `*-development` while the API asks for `*-production` |
+| `CRAWL_UNVERIFY_SSL` | worker (crawl HTTP client) | A site with an incomplete certificate chain fails with `CERTIFICATE_VERIFY_FAILED` even though the setting appears in `dokku config:show` |
+| `OPENAI_API_KEY`, `DATABASE_URL`, `QDRANT_URL`, `MINIO_ENDPOINT` | both | Crawls fail while the API works normally |
+
+After editing `/opt/postharvest/.env`:
+
+```bash
+docker compose up -d --force-recreate prefect-worker
+```
+
+Compose does not always recreate a container for an `env_file` change alone, so
+`--force-recreate` is what actually applies it.
+
+> **On `CRAWL_UNVERIFY_SSL`:** some source sites serve an incomplete certificate
+> chain — the leaf without its intermediate CA. Browsers paper over this by
+> fetching the missing intermediate via the certificate's AIA extension; Python
+> HTTP clients do not, so the site loads fine in a browser and fails for the
+> crawler. `www.ubos.org` is one such site. Listing a site here disables
+> certificate verification for it entirely, which also removes protection against
+> interception — acceptable for public documents, but do not add hosts casually.
