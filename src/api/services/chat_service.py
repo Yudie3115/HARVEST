@@ -6,8 +6,10 @@ from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from loguru import logger
+from openai import RateLimitError as OpenAIRateLimitError
 from sqlalchemy.orm import Session
 
+from src.api.errors import LLM_UNAVAILABLE_MESSAGE
 from src.api.models.requests import ChatRequest
 from src.api.models.responses import ChatResponse, SourceRef, SuggestedQuestion
 from src.api.services.catalogue_service import enqueue_candidate_job
@@ -726,6 +728,14 @@ def process_chat_stream(
     except LLMContextTooLargeError:
         logger.warning(f"Context too large for session {request.session_id}")
         yield f"data: {_json.dumps({'type': 'error', 'message': _CONTEXT_TOO_LARGE_ANSWER})}\n\n"
+    except OpenAIRateLimitError as exc:
+        # The exception handler in main.py cannot help here — the response has
+        # already started, so the only way to tell the user is an SSE event.
+        logger.error(
+            f"Upstream LLM rate limit during stream for session "
+            f"{request.session_id}: {exc}"
+        )
+        yield f"data: {_json.dumps({'type': 'error', 'message': LLM_UNAVAILABLE_MESSAGE})}\n\n"
     except Exception as exc:
         logger.error(f"Streaming chat error for session {request.session_id}: {exc}")
         yield f"data: {_json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"

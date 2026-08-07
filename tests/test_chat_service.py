@@ -555,3 +555,43 @@ def test_suggestions_mix_reviewed_catalogue_and_generated_questions(mocks):
 
     assert [item.kind for item in result] == ["catalogue", "generated"]
     assert result[0].catalogue_entry_id == str(entry.id)
+
+
+def test_stream_reports_llm_quota_exhaustion_as_a_readable_error(mocks):
+    """A 429 mid-stream must reach the user as a meaningful SSE error.
+
+    The exception handler in main.py cannot help once streaming has started,
+    so an uncaught 429 previously surfaced as 'Internal server error'.
+    """
+    import json
+
+    import httpx
+    from openai import RateLimitError as OpenAIRateLimitError
+
+    from src.api.errors import LLM_UNAVAILABLE_MESSAGE
+    from src.api.services.chat_service import process_chat_stream
+
+    mocks["llm"].stream_answer.side_effect = OpenAIRateLimitError(
+        "Error code: 429 - You have no credits remaining.",
+        response=httpx.Response(
+            429, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        ),
+        body={"error": {"code": "credit_balance_exhausted"}},
+    )
+    request = _make_request(mocks["session_id"])
+
+    events = list(
+        process_chat_stream(
+            request=request,
+            db=mocks["db"],
+            llm_client=mocks["llm"],
+            embedding_client=mocks["embedding"],
+            vector_db_client=mocks["vector_db"],
+            translation_client=mocks["translation"],
+        )
+    )
+
+    payload = json.loads(events[-1].removeprefix("data: ").strip())
+    assert payload["type"] == "error"
+    assert payload["message"] == LLM_UNAVAILABLE_MESSAGE
+    assert payload["message"] != "Internal server error"
