@@ -354,7 +354,7 @@ export default function AddDocumentPage() {
   return (
     <div className="p-6 font-admin max-w-[700px]">
       <div className="mb-5">
-        <h1 className="text-lg font-semibold text-admin-text">Add Document</h1>
+        <h1 className="text-lg font-semibold text-admin-text">Add Document(s)</h1>
         <p className="text-xs text-admin-muted mt-0.5">
           Upload a file or provide a URL to add a document to the knowledge base.
           Documents below the relevance threshold are rejected automatically.

@@ -16,7 +16,7 @@ const NAV = [
   { to: '/admin/catalogue',      label: 'Q&A Catalogue',   Icon: Library         },
   { to: '/admin/access-codes',   label: 'Access Codes',    Icon: KeyRound        },
   { to: '/admin/config',         label: 'Configuration',   Icon: Settings        },
-  { to: '/admin/add-document',   label: 'Add Document',    Icon: Plus            },
+  { to: '/admin/add-document',   label: 'Add Document(s)', Icon: Plus            },
 ]
 
 export default function AdminLayout() {
