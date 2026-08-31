@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock3, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { adminApi } from '../api'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
@@ -76,6 +77,8 @@ function ProcessingLogTooltip({ log, documentId, documentTitle }) {
 }
 
 export default function Documents() {
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight')
   const [docs, setDocs] = useState([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -99,6 +102,14 @@ export default function Documents() {
   useEffect(() => {
     load(0)
   }, [site, status, sort])
+
+  // Arriving from Add Document with ?highlight=<id> — point straight at the
+  // just-submitted row instead of leaving the visitor to scan the list.
+  useEffect(() => {
+    if (!highlightId || !docs.some(d => d.id === highlightId)) return
+    setExpanded(highlightId)
+    document.getElementById(`doc-row-${highlightId}`)?.scrollIntoView({ block: 'center' })
+  }, [docs, highlightId])
 
   useEffect(() => {
     adminApi.getConfig()
@@ -294,12 +305,15 @@ export default function Documents() {
                   <Fragment key={doc.id}>
                     <tr
                       key={doc.id}
+                      id={`doc-row-${doc.id}`}
                       onClick={() => {
                         setExpanded(expanded === doc.id ? null : doc.id)
                         setConfirming(null)
                         setEditingTitleId(null)
                       }}
-                      className="border-b border-admin-border hover:bg-admin-hover cursor-pointer transition-colors"
+                      className={`border-b border-admin-border hover:bg-admin-hover cursor-pointer transition-colors ${
+                        doc.id === highlightId ? 'bg-blue-500/10' : ''
+                      }`}
                     >
                       <td className="px-4 py-3 text-admin-text max-w-[240px] font-medium">
                         <div className="flex items-center gap-1.5">

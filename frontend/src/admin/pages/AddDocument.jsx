@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
+import { Link as RouterLink } from 'react-router-dom'
 import { Upload, Link2, FileText, Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
 import { adminApi } from '../api'
 import { Input } from '../../components/ui/input'
@@ -27,7 +28,17 @@ function ResultBanner({ result, onDismiss, label }) {
         <CheckCircle size={14} className="mt-0.5 flex-shrink-0" />
         <div>
           {label && <span className="font-medium">{label}: </span>}
-          Queued for processing. It will appear in Documents once indexing finishes.
+          Queued for processing.{' '}
+          {result.document_id ? (
+            <RouterLink
+              to={`/admin/documents?highlight=${result.document_id}`}
+              className="underline hover:text-blue-200"
+            >
+              Track its progress in Documents
+            </RouterLink>
+          ) : (
+            'It will appear in Documents once indexing finishes.'
+          )}
         </div>
         {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-blue-500 hover:text-blue-300">×</button>}
       </div>

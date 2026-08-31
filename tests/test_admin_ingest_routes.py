@@ -6,6 +6,7 @@ triggers a flow run — so these assert on staging and triggering rather than
 on the pipeline itself.
 """
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -48,7 +49,10 @@ def test_file_ingest_stages_upload_and_triggers_flow():
         )
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    document_id = body.pop("document_id")
+    UUID(document_id)  # raises if not a valid UUID
+    assert body == {
         "status": "queued",
         "flow_run_id": "flow-run-1",
         "filename": "guide.pdf",
@@ -58,6 +62,8 @@ def test_file_ingest_stages_upload_and_triggers_flow():
 
     deployment_name, parameters = trigger.await_args.args
     assert deployment_name.startswith("ingest_manual_upload/ingest-upload-")
+    doc_uuid = parameters.pop("doc_uuid")
+    UUID(doc_uuid)  # raises if not a valid UUID
     assert parameters == {
         "staging_object": "staging/abc.pdf",
         "filename": "guide.pdf",

@@ -712,6 +712,48 @@ def _discard_staged_upload(object_name: str) -> None:
         logger.warning(f"Could not delete staging object {object_name}: {exc}")
 
 
+def _create_queued_document(
+    source_url: str,
+    site_name: str,
+    title: Optional[str],
+    document_type: Optional[str],
+    file_hash: Optional[str],
+) -> Document:
+    """Create the Document row before the worker picks up the flow run.
+
+    ingest_manual_document() used to be the only thing that created this row,
+    so a document stayed invisible in the Admin Documents list for however
+    long the flow run sat waiting on the worker. Creating it here — status
+    QUEUED — means it shows up immediately on submission.
+    """
+    from src.storage.postgres import PostgresClient
+
+    db = PostgresClient()
+    crawl_run = db.get_or_create_manual_crawl_run()
+    doc = db.create_document(
+        url=source_url,
+        site_name=site_name,
+        crawl_run_id=crawl_run.id,
+        title=title,
+        document_type=document_type,
+        file_hash=file_hash,
+        metadata={"manual_upload": True},
+    )
+    db.update_document_status(doc.id, DocumentStatus.QUEUED)
+    return doc
+
+
+def _mark_document_failed(document_id: UUID, error_log: str) -> None:
+    from src.storage.postgres import PostgresClient
+
+    try:
+        PostgresClient().update_document_status(
+            document_id, DocumentStatus.FAILED, error_log=error_log
+        )
+    except Exception as exc:
+        logger.warning(f"Could not mark document {document_id} failed: {exc}")
+
+
 @router.post("/documents/ingest")
 async def ingest_document(
     file: Optional[UploadFile] = File(None),
@@ -723,6 +765,7 @@ async def ingest_document(
     if file is None and not url:
         raise HTTPException(status_code=400, detail="Provide either a file upload or a url field.")
 
+    queued_doc: Optional[Document] = None
     try:
         if file is not None:
             staging_object, file_hash = await asyncio.to_thread(
@@ -737,13 +780,34 @@ async def ingest_document(
                 await asyncio.to_thread(_discard_staged_upload, staging_object)
                 return duplicate
 
+            from src.flows.processing import _detect_document_type
+
+            doc_uuid = str(uuid4())
+            source_url = f"upload://{doc_uuid}/{file.filename}"
+            mime_type, _ = mimetypes.guess_type(file.filename)
+            mime_type = mime_type or "application/octet-stream"
+            document_type = _detect_document_type(file.filename, mime_type)
+
+            queued_doc = await asyncio.to_thread(
+                _create_queued_document,
+                source_url,
+                site_name or "manual",
+                title or file.filename,
+                document_type,
+                file_hash,
+            )
+
             parameters = {
                 "staging_object": staging_object,
                 "filename": file.filename,
                 "title": title or None,
                 "site_name": site_name or "manual",
+                "doc_uuid": doc_uuid,
             }
         else:
+            queued_doc = await asyncio.to_thread(
+                _create_queued_document, url, site_name or "manual", title or url, None, None
+            )
             parameters = {
                 "url": url,
                 "title": title or None,
@@ -757,6 +821,10 @@ async def ingest_document(
     except Exception as exc:
         source = file.filename if file is not None else url
         logger.exception(f"Admin document ingestion failed for {source}: {exc}")
+        if queued_doc is not None:
+            await asyncio.to_thread(
+                _mark_document_failed, queued_doc.id, f"Could not queue for processing: {exc}"
+            )
         raise HTTPException(
             status_code=500,
             detail=(
@@ -768,6 +836,7 @@ async def ingest_document(
     return {
         "status": "queued",
         "flow_run_id": run.get("id"),
+        "document_id": str(queued_doc.id),
         "filename": file.filename if file is not None else None,
         "url": url or None,
     }

@@ -37,6 +37,7 @@ def ingest_manual_document(
     title: Optional[str] = None,
     site_name: str = "manual",
     metadata: Optional[dict] = None,
+    doc_uuid: Optional[str] = None,
 ) -> dict:
     """
     Ingest a document into the knowledge base without going through web crawling.
@@ -92,7 +93,7 @@ def ingest_manual_document(
         mime_type = None
         doc_type = None
     else:
-        doc_uuid = str(uuid4())
+        doc_uuid = doc_uuid or str(uuid4())
         source_url = f"upload://{doc_uuid}/{filename}"
         mime_type, _ = mimetypes.guess_type(filename)
         mime_type = mime_type or "application/octet-stream"
@@ -304,6 +305,7 @@ def ingest_manual_upload_flow(
     url: Optional[str] = None,
     title: Optional[str] = None,
     site_name: str = "manual",
+    doc_uuid: Optional[str] = None,
 ) -> dict:
     """
     Worker-side entry point for Admin document ingestion.
@@ -324,6 +326,9 @@ def ingest_manual_upload_flow(
         url:            Remote document to download instead of an upload.
         title:          Optional title override.
         site_name:      Document source label.
+        doc_uuid:       ID the API already used to create the Document row
+            (status QUEUED) before triggering this run — reused here so the
+            row is updated in place instead of a second one being created.
     """
     minio = MinIOClient()
 
@@ -335,6 +340,7 @@ def ingest_manual_upload_flow(
             url=url,
             title=title,
             site_name=site_name,
+            doc_uuid=doc_uuid,
         )
     finally:
         if staging_object:
