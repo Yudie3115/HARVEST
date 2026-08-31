@@ -114,7 +114,7 @@ curl -L https://dl.min.io/client/mc/release/linux-amd64/mc -o ~/.local/bin/mc
 chmod +x ~/.local/bin/minio ~/.local/bin/mc
 ```
 
-Start MinIO with the credentials used by `.env`:
+### Run it once, on demand
 
 ```bash
 mkdir -p ~/.local/share/postharvest/minio
@@ -123,7 +123,82 @@ export MINIO_ROOT_PASSWORD=minioadmin123
 minio server ~/.local/share/postharvest/minio --console-address ":9001"
 ```
 
-In another terminal, create the bucket:
+### Run it as a systemd user service (recommended — no re-exporting credentials, autostarts)
+
+On distros with systemd (including WSL2 with `systemd=true` in `/etc/wsl.conf`),
+run MinIO and the local Prefect server as `systemd --user` services so they
+start automatically and the root credentials never need to be typed again.
+
+Store the credentials once in an env file (not committed, not in your shell
+history):
+
+```bash
+mkdir -p ~/.config/postharvest
+cat > ~/.config/postharvest/minio.env <<'EOF'
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin123
+EOF
+chmod 600 ~/.config/postharvest/minio.env
+```
+
+Create `~/.config/systemd/user/postharvest-minio.service`:
+
+```ini
+[Unit]
+Description=MinIO object storage (Post-Harvest Knowledge Scraper - local dev)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/postharvest/minio.env
+ExecStart=%h/.local/bin/minio server %h/.local/share/postharvest/minio --console-address :9001
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+```
+
+And `~/.config/systemd/user/postharvest-prefect.service` (adjust the paths to
+your checkout and venv):
+
+```ini
+[Unit]
+Description=Prefect server (Post-Harvest Knowledge Scraper - local dev)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/post-harvest-knowledge-scraper
+ExecStart=/path/to/post-harvest-knowledge-scraper/.venv/bin/prefect server start --host 127.0.0.1 --port 4200
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+```
+
+Enable both, and enable lingering so they also start on boot/WSL start even
+before you log in interactively:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now postharvest-minio.service postharvest-prefect.service
+sudo loginctl enable-linger "$USER"
+```
+
+If `enable-linger` fails with `Could not enable linger: No such device or
+address` (a known WSL2 systemd-logind quirk), just retry the same command —
+it typically succeeds on the second attempt.
+
+Check status/logs the normal systemd way:
+
+```bash
+systemctl --user status postharvest-minio.service postharvest-prefect.service
+journalctl --user -u postharvest-minio.service -f
+```
+
+In another terminal, create the bucket (only needed once):
 
 ```bash
 mc alias set local http://localhost:9000 minioadmin minioadmin123
@@ -134,9 +209,17 @@ Verify:
 
 ```bash
 curl http://localhost:9000/minio/health/live
+curl http://127.0.0.1:4200/api/health
 ```
 
-The MinIO console is available at `http://localhost:9001`.
+The MinIO console is available at `http://localhost:9001`. The Prefect UI is
+available at `http://localhost:4200`.
+
+Ollama (if installed via its official Linux installer) and PostgreSQL
+(installed via `apt`/`brew` above) already register their own system-level
+systemd/launchd services and autostart — no extra setup needed for those two.
+ChromaDB needs no service; it runs embedded in the API process and persists to
+`CHROMA_PATH`.
 
 ## Run The App
 
