@@ -280,7 +280,7 @@ TARGET_CROPS = [
     "maize",
     "sorghum",
     "groundnut",
-    # "beans",
+    "beans",
     # "cassava",
     # "sweet_potato",
     # "rice",
