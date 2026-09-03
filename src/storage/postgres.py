@@ -163,11 +163,20 @@ class PostgresClient:
             return session.query(Document).filter(Document.url == url).first()
 
     def get_document_by_file_hash(self, file_hash: str) -> Optional[Document]:
-        """Return an existing document with identical stored source bytes."""
+        """Return an existing document with identical stored source bytes.
+
+        Only matches rows that actually have a file in object storage
+        (``file_path`` set). A row can carry a file_hash without ever having
+        stored bytes — e.g. a failed upload whose staging copy was discarded —
+        and such a row is not "already in the knowledge base"; treating it as
+        a duplicate would permanently block re-uploading that same file.
+        """
         with self.get_session() as session:
             return (
                 session.query(Document)
                 .filter(Document.file_hash == file_hash)
+                .filter(Document.file_path.isnot(None))
+                .filter(Document.file_path != "")
                 .order_by(Document.discovered_at.asc())
                 .first()
             )

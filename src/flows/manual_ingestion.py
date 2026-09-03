@@ -38,6 +38,7 @@ def ingest_manual_document(
     site_name: str = "manual",
     metadata: Optional[dict] = None,
     doc_uuid: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> dict:
     """
     Ingest a document into the knowledge base without going through web crawling.
@@ -50,6 +51,13 @@ def ingest_manual_document(
     (``settings.relevance_threshold``). Documents that score below the threshold
     are stored with status SKIPPED and their classification is recorded, but no
     chunks are written to the vector database.
+
+    ``document_id``, when given, is the id of a Document row the API already
+    created (status QUEUED) before triggering this run. It is excluded from
+    the duplicate lookup below so that row isn't mistaken for a pre-existing
+    duplicate of itself — without it, every manual upload would find its own
+    just-created row and return "duplicate" immediately, leaving it stuck at
+    QUEUED forever.
 
     Returns a dict with keys:
         status          "processed" | "duplicate" | "skipped" | "failed"
@@ -72,7 +80,7 @@ def ingest_manual_document(
         if file_hash
         else db.get_document_by_url(url)
     )
-    if existing is not None:
+    if existing is not None and str(existing.id) != document_id:
         return {
             "document_id": str(existing.id),
             "url": existing.url,
@@ -306,6 +314,7 @@ def ingest_manual_upload_flow(
     title: Optional[str] = None,
     site_name: str = "manual",
     doc_uuid: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> dict:
     """
     Worker-side entry point for Admin document ingestion.
@@ -329,6 +338,9 @@ def ingest_manual_upload_flow(
         doc_uuid:       ID the API already used to create the Document row
             (status QUEUED) before triggering this run — reused here so the
             row is updated in place instead of a second one being created.
+        document_id:    Id of that same pre-created Document row, so the
+            duplicate check doesn't mistake it for an existing duplicate of
+            itself (see ingest_manual_document).
     """
     minio = MinIOClient()
 
@@ -341,6 +353,7 @@ def ingest_manual_upload_flow(
             title=title,
             site_name=site_name,
             doc_uuid=doc_uuid,
+            document_id=document_id,
         )
     finally:
         if staging_object:

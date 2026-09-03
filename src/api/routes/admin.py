@@ -803,6 +803,7 @@ async def ingest_document(
                 "title": title or None,
                 "site_name": site_name or "manual",
                 "doc_uuid": doc_uuid,
+                "document_id": str(queued_doc.id),
             }
         else:
             queued_doc = await asyncio.to_thread(
@@ -812,6 +813,7 @@ async def ingest_document(
                 "url": url,
                 "title": title or None,
                 "site_name": site_name or "manual",
+                "document_id": str(queued_doc.id),
             }
 
         deployment_name = _prefect_deployment_name("ingest_manual_upload", "ingest-upload")

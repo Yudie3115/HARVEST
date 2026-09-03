@@ -64,6 +64,7 @@ def test_file_ingest_stages_upload_and_triggers_flow():
     assert deployment_name.startswith("ingest_manual_upload/ingest-upload-")
     doc_uuid = parameters.pop("doc_uuid")
     UUID(doc_uuid)  # raises if not a valid UUID
+    assert parameters.pop("document_id") == document_id
     assert parameters == {
         "staging_object": "staging/abc.pdf",
         "filename": "guide.pdf",
@@ -88,9 +89,12 @@ def test_url_ingest_triggers_flow_without_staging():
         )
 
     assert response.status_code == 200
-    assert response.json()["flow_run_id"] == "flow-run-2"
+    body = response.json()
+    assert body["flow_run_id"] == "flow-run-2"
     stage.assert_not_called()
-    assert trigger.await_args.args[1] == {
+    parameters = dict(trigger.await_args.args[1])
+    assert parameters.pop("document_id") == body["document_id"]
+    assert parameters == {
         "url": "https://example.org/a.pdf",
         "title": None,
         "site_name": "naro",
