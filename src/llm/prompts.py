@@ -57,13 +57,13 @@ Document excerpt:
 
 Extract the following information:
 
-1. primary_topics: Main topics from this list - {topics}
-2. crops_mentioned: Specific crops mentioned from this list - {crops}
-3. regions: Geographic areas mentioned (Ugandan districts or regions)
-4. document_type: Category from {document_types}
-5. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
-6. language: Primary language (English, Luganda, Swahili, etc.)
-7. relevance_score: Rate 0-10 for relevance to pre-harvest and post-harvest crop practices
+1. relevance_score: Rate 0-10 for relevance to pre-harvest and post-harvest crop practices (see scoring guide below)
+2. primary_topics: Main topics from this list - {topics}
+3. crops_mentioned: Specific crops mentioned from this list - {crops}
+4. regions: Geographic areas mentioned (Ugandan districts or regions)
+5. document_type: Category from {document_types}
+6. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
+7. language: Primary language (English, Luganda, Swahili, etc.)
 8. summary: Concise 2-3 sentence summary of the main content
 9. key_practices: List of specific best practices or recommendations mentioned
 10. actionable: Boolean - does this contain practical, actionable advice?
@@ -77,7 +77,7 @@ Scoring guide:
 - 3-4: Tangentially relevant - agricultural content but not about growing, harvesting, or handling crops (e.g. livestock, general policy)
 - 0-2: Not relevant - unrelated to agriculture
 
-Return as a single JSON object with all fields."""
+Return a single JSON object containing all 12 fields, starting with "relevance_score"."""
 
 
 def build_content_classification_prompt(content: str, url: str = "") -> str:

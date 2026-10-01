@@ -265,7 +265,35 @@ class TestLLMClient:
         client, mock_api = self._make_client("{bad json")
         result = client.classify_content("Some content")
         assert result["relevance_score"] == 5.0
+        assert result["classification_failed"] is True
         assert isinstance(result["topics"], list)
+
+    def test_classify_content_retries_when_score_missing(self):
+        from src.llm.client import LLMClient
+
+        client = LLMClient.__new__(LLMClient)
+        client.provider = "test"
+        client._generate = MagicMock(
+            side_effect=[
+                json.dumps({"topics": ["storage"]}),
+                "{bad json",
+                json.dumps({"topics": ["storage"], "relevance_score": "8"}),
+            ]
+        )
+        result = client.classify_content("Maize storage.")
+        assert client._generate.call_count == 3
+        assert result["relevance_score"] == 8.0
+        assert "classification_failed" not in result
+
+    def test_classify_content_gives_up_after_three_attempts(self):
+        from src.llm.client import LLMClient
+
+        client = LLMClient.__new__(LLMClient)
+        client.provider = "test"
+        client._generate = MagicMock(return_value=json.dumps({"topics": ["storage"]}))
+        result = client.classify_content("Maize storage.")
+        assert client._generate.call_count == 3
+        assert result["classification_failed"] is True
 
     def test_default_classification(self):
         from src.llm.client import LLMClient
@@ -318,6 +346,7 @@ class TestPrompts:
         from src.llm.client import LLMClient
 
         client = LLMClient.__new__(LLMClient)
+        client.provider = "test"
         client._generate = MagicMock(return_value='{"relevance_score": 8}')
         client.classify_content("Planting maize early in the season.", url="https://x.org")
         prompt = client._generate.call_args.kwargs["prompt"]

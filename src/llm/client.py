@@ -17,6 +17,10 @@ from src.llm.prompts import (
 )
 
 
+# How many times to ask the LLM for a usable content classification.
+CLASSIFICATION_ATTEMPTS = 3
+
+
 class LLMContextTooLargeError(Exception):
     """Raised when the LLM rejects a request because the token count exceeds its limit."""
 
@@ -266,11 +270,29 @@ class LLMClient:
         system_prompt = CONTENT_CLASSIFICATION_SYSTEM
         prompt = build_content_classification_prompt(truncated_content, url=url)
 
-        try:
-            response = self._generate(
-                prompt=prompt, system_prompt=system_prompt, response_format="json", temperature=0.2
-            )
-            classification = json.loads(response)
+        # Small local models sometimes return unparseable JSON or omit the score.
+        # Ask again rather than silently recording a made-up score.
+        for attempt in range(1, CLASSIFICATION_ATTEMPTS + 1):
+            try:
+                response = self._generate(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    response_format="json",
+                    temperature=0.2,
+                )
+                classification = json.loads(response)
+                if not isinstance(classification, dict):
+                    raise ValueError("response is not a JSON object")
+                classification["relevance_score"] = float(classification["relevance_score"])
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.warning(
+                    f"Unusable content classification (attempt {attempt}/"
+                    f"{CLASSIFICATION_ATTEMPTS}): {type(e).__name__}: {e}"
+                )
+                continue
+            except Exception as e:
+                logger.error(f"Content classification error: {e}")
+                return self._default_classification(content)
 
             # Normalize field names: LLM may return primary_topics/crops_mentioned
             if "primary_topics" in classification and "topics" not in classification:
@@ -278,8 +300,6 @@ class LLMClient:
             if "crops_mentioned" in classification and "crops" not in classification:
                 classification["crops"] = classification.pop("crops_mentioned")
 
-            # Validate and set defaults
-            classification.setdefault("relevance_score", 5.0)
             classification.setdefault("topics", [])
             classification.setdefault("crops", [])
             classification.setdefault("regions", [])
@@ -287,18 +307,17 @@ class LLMClient:
             classification.setdefault("has_data", False)
 
             logger.debug(
-                f"Classified content ({self.provider}): relevance={classification['relevance_score']}, "
+                f"Classified content ({self.provider}): "
+                f"relevance={classification['relevance_score']}, "
                 f"topics={classification['topics']}"
             )
-
             return classification
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse content classification: {e}")
-            return self._default_classification(content)
-        except Exception as e:
-            logger.error(f"Content classification error: {e}")
-            return self._default_classification(content)
+        logger.error(
+            f"Content classification failed after {CLASSIFICATION_ATTEMPTS} attempts; "
+            "document needs review"
+        )
+        return self._default_classification(content)
 
     def extract_information(self, text: str, query: str, max_length: int = 3000) -> str:
         """
@@ -369,8 +388,14 @@ If the answer is not found in the document, respond with "Information not found 
 
     @staticmethod
     def _default_classification(content: str) -> Dict:
-        """Return default classification when LLM fails"""
+        """Return default classification when LLM fails.
+
+        The 5.0 score is a placeholder, not a judgement; ``classification_failed``
+        (also stored in llm_metadata) marks the document as needing review.
+        """
         return {
+            "classification_failed": True,
+            "llm_metadata": {"classification_failed": True},
             "relevance_score": 5.0,
             "topics": [],
             "crops": [],

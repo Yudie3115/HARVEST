@@ -324,6 +324,19 @@ class TestIngestManualDocument:
         # No chunks should be stored
         ingestion_mocks["store"].assert_not_called()
 
+    def test_unscored_classification_returns_failed(self, ingestion_mocks):
+        from src.llm.client import LLMClient
+
+        ingestion_mocks["classify"].return_value = LLMClient._default_classification("text")
+
+        from src.flows.manual_ingestion import ingest_manual_document
+
+        result = ingest_manual_document(content=b"some bytes", filename="guide.pdf")
+
+        assert result["status"] == "failed"
+        assert result["reason"] == "classification_failed"
+        ingestion_mocks["store"].assert_not_called()
+
     def test_no_extractable_content_returns_skipped(self, ingestion_mocks):
         ingestion_mocks["extract"].return_value = None
 

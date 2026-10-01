@@ -7,14 +7,19 @@ the same thing.
 - PROCESSED documents are re-classified from their stored chunk text. Their
   classification, chunk topics/crops/regions and admin relevance score are
   updated. Nothing is re-downloaded or re-embedded.
-- SKIPPED documents that were rejected for low relevance are fully re-ingested
-  (file from MinIO, or the original URL), so ones that now pass the threshold
-  are chunked and become available to the chatbot.
+- SKIPPED documents that were rejected for low relevance, and FAILED documents
+  the AI could not score, are fully re-ingested (file from MinIO, or the
+  original URL), so ones that now pass the threshold are chunked and become
+  available to the chatbot.
 
 Usage:
   python -m scripts.rescore_documents --dry-run
   python -m scripts.rescore_documents
   python -m scripts.rescore_documents --only processed --limit 10
+  python -m scripts.rescore_documents --score 5   # only documents currently scored 5.0
+
+If the AI cannot produce a usable score for a processed document, its previous
+classification is kept and the document is reported as an error.
 """
 import argparse
 import sys
@@ -23,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from loguru import logger  # noqa: E402
+from sqlalchemy import and_, or_  # noqa: E402
 
 from src.config.settings import settings  # noqa: E402
 from src.storage.models import (  # noqa: E402
@@ -37,29 +43,48 @@ from src.storage.postgres import PostgresClient  # noqa: E402
 _EXCERPT_CHARS = 4000
 
 
-def _processed_documents(db: PostgresClient, limit: int | None) -> list[tuple[str, str]]:
+def _processed_documents(
+    db: PostgresClient, limit: int | None, score: float | None
+) -> list[tuple[str, str]]:
     with db.get_session() as session:
         query = (
             session.query(Document.id, Document.url)
+            .outerjoin(DocumentClassification, DocumentClassification.document_id == Document.id)
             .filter(Document.status == DocumentStatus.PROCESSED)
             .order_by(Document.discovered_at)
         )
+        if score is not None:
+            query = query.filter(DocumentClassification.relevance_score == score)
         if limit:
             query = query.limit(limit)
         return [(str(doc_id), url) for doc_id, url in query.all()]
 
 
-def _low_relevance_skipped(db: PostgresClient, limit: int | None) -> list[Document]:
+def _low_relevance_skipped(
+    db: PostgresClient, limit: int | None, score: float | None
+) -> list[Document]:
     with db.get_session() as session:
         query = (
             session.query(Document)
             .join(DocumentClassification, DocumentClassification.document_id == Document.id)
             .filter(
-                Document.status == DocumentStatus.SKIPPED,
-                DocumentClassification.relevance_score < settings.relevance_threshold,
+                or_(
+                    and_(
+                        Document.status == DocumentStatus.SKIPPED,
+                        DocumentClassification.relevance_score < settings.relevance_threshold,
+                    ),
+                    and_(
+                        Document.status == DocumentStatus.FAILED,
+                        DocumentClassification.llm_metadata["classification_failed"]
+                        .as_boolean()
+                        .is_(True),
+                    ),
+                )
             )
             .order_by(Document.discovered_at)
         )
+        if score is not None:
+            query = query.filter(DocumentClassification.relevance_score == score)
         if limit:
             query = query.limit(limit)
         docs = query.all()
@@ -94,6 +119,8 @@ def rescore_processed(db: PostgresClient, document_id: str, url: str) -> float |
         return None
 
     classification = classify_document_content(text, url=url)
+    if classification.get("classification_failed"):
+        raise RuntimeError("AI returned no usable score; previous classification kept")
     score = classification.get("relevance_score", 0)
     doc_uuid = UUID(document_id)
 
@@ -138,16 +165,19 @@ def main() -> int:
     )
     parser.add_argument("--limit", type=int, help="Maximum documents per group")
     parser.add_argument(
+        "--score", type=float, help="Only documents whose current relevance score equals this"
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="List what would be re-scored, change nothing"
     )
     args = parser.parse_args()
 
     db = PostgresClient()
-    processed = [] if args.only == "skipped" else _processed_documents(db, args.limit)
-    skipped = [] if args.only == "processed" else _low_relevance_skipped(db, args.limit)
+    processed = [] if args.only == "skipped" else _processed_documents(db, args.limit, args.score)
+    skipped = [] if args.only == "processed" else _low_relevance_skipped(db, args.limit, args.score)
 
     print(f"Processed documents to re-score:        {len(processed)}")
-    print(f"Low-relevance skipped to re-ingest:     {len(skipped)}")
+    print(f"Rejected/unscored to re-ingest:         {len(skipped)}")
     if args.dry_run:
         for doc in skipped:
             print(f"  skipped: {doc.title or doc.url}")
@@ -158,7 +188,7 @@ def main() -> int:
         try:
             score = rescore_processed(db, document_id, url)
         except Exception as exc:
-            logger.error(f"{document_id}: re-score failed: {exc}")
+            logger.error(f"{document_id}: re-score failed: {type(exc).__name__}: {exc}")
             failed += 1
             continue
         if score is not None:
@@ -170,11 +200,17 @@ def main() -> int:
         try:
             result = reingest_skipped(doc)
         except Exception as exc:
-            logger.error(f"{doc.id}: re-ingest failed: {exc}")
+            logger.exception(f"{doc.id}: re-ingest failed: {type(exc).__name__}: {exc}")
+            # Don't leave the document stuck in PROCESSING.
+            db.update_document_status(
+                doc.id, DocumentStatus.FAILED, error_log=f"Re-score failed: {exc!r}"
+            )
             failed += 1
             continue
         if result.get("status") == "processed":
             now_processed += 1
+        elif result.get("reason") == "classification_failed":
+            failed += 1
         print(
             f"[{i}/{len(skipped)}] {result.get('status'):<9} "
             f"{result.get('relevance_score', '-')}  {doc.title or doc.url}"

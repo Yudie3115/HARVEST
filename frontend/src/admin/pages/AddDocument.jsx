@@ -96,7 +96,10 @@ function ResultBanner({ result, onDismiss, label }) {
       <XCircle size={14} className="flex-shrink-0 mt-0.5" />
       <div>
         {label && <span className="font-medium">{label}: </span>}
-        {result.error || 'Ingestion failed. Check the application logs.'}
+        {result.error
+          || (result.reason === 'classification_failed'
+            ? 'The AI could not score this document. Try uploading it again.'
+            : 'Ingestion failed. Check the application logs.')}
       </div>
       {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-red-500 hover:text-red-300">×</button>}
     </div>

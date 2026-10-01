@@ -227,6 +227,31 @@ def ingest_manual_document(
         },
     )
 
+    # --- Classification must have produced a real score ---
+    if classification.get("classification_failed"):
+        db.update_document_status(
+            UUID(doc_id),
+            DocumentStatus.FAILED,
+            error_log="AI could not score this document; needs review or retry",
+        )
+        db.create_classification(UUID(doc_id), classification)
+        _log_processing_status(
+            document_id=doc_id,
+            url=source_url,
+            status="failed",
+            explanation=(
+                "the AI did not return a usable relevance score after several attempts; "
+                "no chunks were indexed"
+            ),
+        )
+        return {
+            "document_id": doc_id,
+            "url": source_url,
+            "status": "failed",
+            "chunks": 0,
+            "reason": "classification_failed",
+        }
+
     # --- Relevance gate ---
     if relevance_score < settings.relevance_threshold:
         db.update_document_status(
