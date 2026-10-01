@@ -300,6 +300,29 @@ class TestPrompts:
         assert content in prompt
         assert url in prompt
 
+    def test_classification_prompts_cover_pre_and_post_harvest_topics(self):
+        from src.llm.prompts import (
+            build_content_classification_prompt,
+            build_url_classification_prompt,
+        )
+
+        content_prompt = build_content_classification_prompt("text", "https://x.org")
+        url_prompt = build_url_classification_prompt(["https://x.org/a.pdf"])
+        for prompt in (content_prompt, url_prompt):
+            assert "field_pests_and_diseases" in prompt
+            assert "seed_and_varieties" in prompt
+            assert "storage" in prompt
+        assert "pre-harvest" in content_prompt
+
+    def test_llm_client_uses_shared_classification_prompt(self):
+        from src.llm.client import LLMClient
+
+        client = LLMClient.__new__(LLMClient)
+        client._generate = MagicMock(return_value='{"relevance_score": 8}')
+        client.classify_content("Planting maize early in the season.", url="https://x.org")
+        prompt = client._generate.call_args.kwargs["prompt"]
+        assert "drought_and_water_stress" in prompt
+
     def test_summarisation_prompt_truncates(self):
         from src.llm.prompts import build_summarisation_prompt
 

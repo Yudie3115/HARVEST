@@ -69,7 +69,7 @@ function ResultBanner({ result, onDismiss, label }) {
         <div>
           {label && <span className="font-medium">{label}: </span>}
           {result.reason === 'low_relevance'
-            ? `Document rejected — not relevant enough to post-harvest knowledge${score}.`
+            ? `Document rejected — not relevant enough to pre-harvest or post-harvest crop knowledge${score}.`
             : 'Document skipped — no extractable text content was found.'}
         </div>
         {onDismiss && <button type="button" onClick={onDismiss} className="ml-auto text-yellow-500 hover:text-yellow-300">×</button>}

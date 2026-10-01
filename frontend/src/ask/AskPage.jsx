@@ -123,7 +123,7 @@ export default function AskPage() {
             <section className="animate-fade-up">
               <div className="mb-10 max-w-[650px]">
                 <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-[#d4a853]">
-                  Trusted post-harvest guidance
+                  Trusted crop guidance
                 </p>
                 <h1 className="m-0 font-display text-[clamp(32px,6vw,52px)] font-medium leading-[1.05] tracking-[-0.025em] text-[#e8e4da]">
                   Start with what the knowledge base already knows.
@@ -134,7 +134,7 @@ export default function AskPage() {
               </div>
 
               <form onSubmit={submitQuestion} className="border-y border-[#334039] bg-[#121a15] px-1 py-2">
-                <label htmlFor="ask-question" className="sr-only">Your post-harvest question</label>
+                <label htmlFor="ask-question" className="sr-only">Your crop question</label>
                 <textarea
                   id="ask-question"
                   value={question}

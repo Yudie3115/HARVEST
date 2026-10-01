@@ -59,7 +59,7 @@ export default function CataloguePage() {
               Questions, answered once and kept useful.
             </h1>
             <p className="mb-0 mt-2 max-w-[600px] text-sm leading-6 text-[#8a9489]">
-              Browse practical answers drawn from trusted post-harvest sources and reviewed before publication.
+              Browse practical answers drawn from trusted crop-farming sources and reviewed before publication.
             </p>
           </div>
 

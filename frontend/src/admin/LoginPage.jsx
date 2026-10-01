@@ -38,7 +38,7 @@ export default function LoginPage() {
             PostHarvest<br />Admin Panel
           </h1>
           <p className="text-sm text-emerald-400/80 leading-relaxed max-w-xs">
-            AI-powered knowledge base management for post-harvest agricultural research in East Africa.
+            AI-powered knowledge base management for pre-harvest and post-harvest crop research in East Africa.
           </p>
         </div>
 

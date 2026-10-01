@@ -10,7 +10,7 @@ const WELCOME = {
   id: 'welcome',
   role: 'assistant',
   content:
-    'Hello! I can answer questions about post-harvest practices — storage, pest control, handling, and more. Ask me anything.',
+    'Hello! I can answer questions about growing and handling crops — seeds, planting, field pests, harvesting, storage, and more. Ask me anything.',
   detectedLanguage: 'eng',
   sources: [],
 }

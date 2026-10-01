@@ -262,7 +262,7 @@ async def whatsapp_webhook(
                 whatsapp_service.send_text(
                     sender_phone,
                     f"You're connected to {result.access_code.label}. "
-                    "Send your post-harvest question any time.",
+                    "Send your crop question any time.",
                 )
             except Exception:
                 pass

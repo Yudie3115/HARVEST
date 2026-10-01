@@ -55,7 +55,7 @@ export default function InputBar({ onSend, disabled }) {
           onKeyDown={handleKeyDown}
           disabled={disabled}
           rows={1}
-          placeholder="Ask about post-harvest practices…"
+          placeholder="Ask about growing, harvesting or storing crops…"
           style={{
             flex: 1,
             background: '#141a15',

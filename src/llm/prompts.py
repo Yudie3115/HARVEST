@@ -1,7 +1,7 @@
 """
 Prompt templates for LLM operations
 """
-from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_CROPS
+from src.config.site_configs import DOCUMENT_TYPES, TARGET_CROPS, TOPICS
 
 
 # ---------------------------------------------------------------------------
@@ -10,10 +10,10 @@ from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_
 
 URL_CLASSIFICATION_SYSTEM = (
     "You are a content classifier for an agricultural knowledge base focused "
-    "on post-harvest practices in Uganda."
+    "on pre-harvest and post-harvest crop practices in Uganda."
 )
 
-URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to post-harvest topics such as storage, drying, pest management, contamination, quality control, handling, and marketing.
+URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to pre-harvest topics (seed and varieties, planting, crop management, drought and water stress, field pests and diseases, harvest timing and methods) and post-harvest topics (storage, drying, pest management, contamination, quality control, handling, and marketing).
 
 URLs:
 {url_list}
@@ -25,7 +25,7 @@ For each URL return a JSON object with these fields (be concise):
 - document_type: one value from {document_types}
 - priority: high/medium/low
 
-Relevant indicators: post-harvest, storage, drying, pest, loss, handling, preservation, quality, contamination, aflatoxin, PDF/DOC files, research publications, extension guides.
+Relevant indicators: seed, variety, planting, agronomy, crop management, drought, water stress, field pests, crop diseases, harvesting, post-harvest, storage, drying, pest, loss, handling, preservation, quality, contamination, aflatoxin, PDF/DOC files, research publications, extension guides.
 
 Return as JSON with a single "urls" key containing the array."""
 
@@ -34,7 +34,7 @@ def build_url_classification_prompt(urls: list[str]) -> str:
     url_list = "\n".join(f"{i}. {url}" for i, url in enumerate(urls, 1))
     return URL_CLASSIFICATION_TEMPLATE.format(
         url_list=url_list,
-        topics=POST_HARVEST_TOPICS,
+        topics=TOPICS,
         document_types=DOCUMENT_TYPES,
     )
 
@@ -44,10 +44,11 @@ def build_url_classification_prompt(urls: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 CONTENT_CLASSIFICATION_SYSTEM = (
-    "You are an agricultural content analyzer specializing in post-harvest practices."
+    "You are an agricultural content analyzer specializing in pre-harvest and "
+    "post-harvest crop practices."
 )
 
-CONTENT_CLASSIFICATION_TEMPLATE = """Analyze this agricultural document excerpt and extract structured metadata for a post-harvest knowledge base.
+CONTENT_CLASSIFICATION_TEMPLATE = """Analyze this agricultural document excerpt and extract structured metadata for a crop knowledge base covering pre-harvest and post-harvest practices.
 
 Source URL: {url}
 
@@ -62,7 +63,7 @@ Extract the following information:
 4. document_type: Category from {document_types}
 5. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
 6. language: Primary language (English, Luganda, Swahili, etc.)
-7. relevance_score: Rate 0-10 for post-harvest knowledge base relevance
+7. relevance_score: Rate 0-10 for relevance to pre-harvest and post-harvest crop practices
 8. summary: Concise 2-3 sentence summary of the main content
 9. key_practices: List of specific best practices or recommendations mentioned
 10. actionable: Boolean - does this contain practical, actionable advice?
@@ -70,11 +71,11 @@ Extract the following information:
 12. technical_level: Simple/Intermediate/Advanced - complexity level
 
 Scoring guide:
-- 9-10: Highly relevant - dedicated post-harvest guidance, research, or policy
-- 7-8: Very relevant - contains substantial post-harvest information
-- 5-6: Moderately relevant - mentions post-harvest topics
-- 3-4: Tangentially relevant - agricultural content but not post-harvest focused
-- 0-2: Not relevant - unrelated to agriculture or post-harvest
+- 9-10: Highly relevant - dedicated pre-harvest or post-harvest crop guidance, research, or policy
+- 7-8: Very relevant - contains substantial pre-harvest or post-harvest crop information
+- 5-6: Moderately relevant - mentions pre-harvest or post-harvest topics
+- 3-4: Tangentially relevant - agricultural content but not about growing, harvesting, or handling crops (e.g. livestock, general policy)
+- 0-2: Not relevant - unrelated to agriculture
 
 Return as a single JSON object with all fields."""
 
@@ -83,7 +84,7 @@ def build_content_classification_prompt(content: str, url: str = "") -> str:
     return CONTENT_CLASSIFICATION_TEMPLATE.format(
         url=url,
         content=content,
-        topics=POST_HARVEST_TOPICS,
+        topics=TOPICS,
         document_types=DOCUMENT_TYPES,
         crops=TARGET_CROPS,
     )
@@ -119,7 +120,7 @@ def build_information_extraction_prompt(text: str, query: str) -> str:
 
 SUMMARISATION_SYSTEM = "You are an expert at summarizing agricultural content."
 
-SUMMARISATION_TEMPLATE = """Provide a concise {max_length}-character summary of this agricultural text, focusing on key post-harvest practices and recommendations:
+SUMMARISATION_TEMPLATE = """Provide a concise {max_length}-character summary of this agricultural text, focusing on key pre-harvest and post-harvest practices and recommendations:
 
 {text}
 
@@ -134,7 +135,7 @@ def build_summarisation_prompt(text: str, max_length: int = 200) -> str:
 # RAG Q&A
 # ---------------------------------------------------------------------------
 
-QA_SYSTEM_PROMPT = """You are an agricultural knowledge assistant specialising in post-harvest practices in Uganda and East Africa. Answer questions using only the provided document excerpts. Always cite your sources by referring to the source number (e.g. [1], [2]). If the excerpts do not contain enough information to answer the question, say so clearly — do not fabricate information."""
+QA_SYSTEM_PROMPT = """You are an agricultural knowledge assistant specialising in pre-harvest and post-harvest crop practices in Uganda and East Africa. Answer questions using only the provided document excerpts. Always cite your sources by referring to the source number (e.g. [1], [2]). If the excerpts do not contain enough information to answer the question, say so clearly — do not fabricate information."""
 
 QA_ANSWER_TEMPLATE = """Use the following document excerpts to answer the question. Each excerpt is preceded by its source number.
 

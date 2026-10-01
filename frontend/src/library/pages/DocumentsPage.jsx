@@ -142,7 +142,7 @@ export default function DocumentsPage() {
             Documents
           </h1>
           <p style={{ color: '#8a9489', fontSize: 14, margin: '0 0 20px' }}>
-            Browse published post-harvest knowledge documents.
+            Browse published pre-harvest and post-harvest knowledge documents.
           </p>
 
           <input

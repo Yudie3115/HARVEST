@@ -245,6 +245,15 @@ SITE_CONFIGS: dict[str, SiteConfig] = {
 
 
 # Topic taxonomy for classification
+PRE_HARVEST_TOPICS = [
+    "seed_and_varieties",
+    "planting",
+    "crop_management",
+    "drought_and_water_stress",
+    "field_pests_and_diseases",
+    "harvest_timing_and_methods",
+]
+
 POST_HARVEST_TOPICS = [
     "storage",
     "drying",
@@ -260,6 +269,8 @@ POST_HARVEST_TOPICS = [
     "cold_chain",
     "warehouse_management",
 ]
+
+TOPICS = PRE_HARVEST_TOPICS + POST_HARVEST_TOPICS
 
 # Document types
 DOCUMENT_TYPES = [

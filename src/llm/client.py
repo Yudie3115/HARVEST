@@ -7,7 +7,14 @@ from loguru import logger
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from src.config.settings import settings
-from src.config.site_configs import POST_HARVEST_TOPICS, DOCUMENT_TYPES, TARGET_CROPS
+from src.llm.prompts import (
+    CONTENT_CLASSIFICATION_SYSTEM,
+    SUMMARISATION_SYSTEM,
+    URL_CLASSIFICATION_SYSTEM,
+    build_content_classification_prompt,
+    build_summarisation_prompt,
+    build_url_classification_prompt,
+)
 
 
 class LLMContextTooLargeError(Exception):
@@ -170,7 +177,7 @@ class LLMClient:
 
     def classify_urls(self, urls: List[str]) -> List[Dict]:
         """
-        Classify a batch of URLs for relevance to post-harvest topics
+        Classify a batch of URLs for relevance to pre-harvest and post-harvest topics
 
         Args:
             urls: List of URLs to classify
@@ -185,24 +192,8 @@ class LLMClient:
         for i in range(0, len(urls), BATCH_SIZE):
             batch = urls[i : i + BATCH_SIZE]
 
-            system_prompt = "You are a content classifier for an agricultural knowledge base focused on post-harvest practices in Uganda."
-
-            prompt = f"""Analyze these URLs and determine their relevance to post-harvest topics such as storage, drying, pest management, contamination, quality control, handling, and marketing.
-
-URLs:
-{chr(10).join(f"{idx}. {url}" for idx, url in enumerate(batch, 1))}
-
-For each URL return a JSON object with these fields (be concise):
-- url: The original URL
-- relevance_score: 0-10 (10 = highly relevant)
-- topics: list from {POST_HARVEST_TOPICS}
-- document_type: one value from {DOCUMENT_TYPES}
-- priority: high/medium/low
-
-Relevant indicators: post-harvest, storage, drying, pest, loss, handling, preservation, quality, contamination, aflatoxin, PDF/DOC files, research publications, extension guides.
-
-Return as JSON with a single "urls" key containing the array.
-"""
+            system_prompt = URL_CLASSIFICATION_SYSTEM
+            prompt = build_url_classification_prompt(batch)
 
             try:
                 response = self._generate(
@@ -272,41 +263,8 @@ Return as JSON with a single "urls" key containing the array.
         # Truncate content if too long
         truncated_content = content[:max_length]
 
-        system_prompt = (
-            "You are an agricultural content analyzer specializing in post-harvest practices."
-        )
-
-        prompt = f"""Analyze this agricultural document excerpt and extract structured metadata for a post-harvest knowledge base.
-
-Source URL: {url}
-
-Document excerpt:
-{truncated_content}
-
-Extract the following information:
-
-1. primary_topics: Main topics from this list - {POST_HARVEST_TOPICS}
-2. crops_mentioned: Specific crops mentioned from this list - {TARGET_CROPS}
-3. regions: Geographic areas mentioned (Ugandan districts or regions)
-4. document_type: Category from {DOCUMENT_TYPES}
-5. target_audience: Who should read this (farmers, extension_workers, researchers, traders, policymakers)
-6. language: Primary language (English, Luganda, Swahili, etc.)
-7. relevance_score: Rate 0-10 for post-harvest knowledge base relevance
-8. summary: Concise 2-3 sentence summary of the main content
-9. key_practices: List of specific best practices or recommendations mentioned
-10. actionable: Boolean - does this contain practical, actionable advice?
-11. has_data: Boolean - does this contain statistics, measurements, or quantitative data?
-12. technical_level: Simple/Intermediate/Advanced - complexity level
-
-Scoring guide:
-- 9-10: Highly relevant - dedicated post-harvest guidance, research, or policy
-- 7-8: Very relevant - contains substantial post-harvest information
-- 5-6: Moderately relevant - mentions post-harvest topics
-- 3-4: Tangentially relevant - agricultural content but not post-harvest focused
-- 0-2: Not relevant - unrelated to agriculture or post-harvest
-
-Return as a single JSON object with all fields.
-"""
+        system_prompt = CONTENT_CLASSIFICATION_SYSTEM
+        prompt = build_content_classification_prompt(truncated_content, url=url)
 
         try:
             response = self._generate(
@@ -395,13 +353,8 @@ If the answer is not found in the document, respond with "Information not found 
         summaries = []
 
         for text in texts:
-            system_prompt = "You are an expert at summarizing agricultural content."
-
-            prompt = f"""Provide a concise {max_length}-character summary of this agricultural text, focusing on key post-harvest practices and recommendations:
-
-{text[:2000]}
-
-Summary:"""
+            system_prompt = SUMMARISATION_SYSTEM
+            prompt = build_summarisation_prompt(text, max_length=max_length)
 
             try:
                 summary = self._generate(
@@ -457,7 +410,7 @@ Summary:"""
 
     def evaluate_catalogue_candidate(self, question: str, answer: str) -> Dict:
         """Return a bounded quality score and a reusable English question."""
-        prompt = f"""Assess whether this post-harvest Q&A is useful as a reusable public catalogue entry.
+        prompt = f"""Assess whether this crop-practice Q&A is useful as a reusable public catalogue entry.
 
 Question:
 {question[:3000]}
@@ -474,7 +427,7 @@ and answers that depend on missing conversational context."""
         raw = self._generate(
             prompt=prompt,
             system_prompt=(
-                "You curate a trusted post-harvest agriculture Q&A catalogue. "
+                "You curate a trusted pre-harvest and post-harvest crop Q&A catalogue. "
                 "Return valid JSON only and do not add facts."
             ),
             response_format="json",
@@ -513,7 +466,7 @@ Do not claim that the evidence contains information it does not contain."""
         raw = self._generate(
             prompt=prompt,
             system_prompt=(
-                "You help researchers navigate trusted post-harvest agriculture evidence. "
+                "You help researchers navigate trusted pre-harvest and post-harvest crop evidence. "
                 "Return valid JSON only."
             ),
             response_format="json",
