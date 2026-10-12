@@ -6,6 +6,15 @@ from typing import Optional, List, Dict, Union
 from loguru import logger
 
 
+def _strip_nul(text: str) -> str:
+    """Strip NUL (0x00) bytes some PDFs embed in extracted text/metadata.
+
+    Postgres text columns reject NUL bytes outright, so a single stray
+    0x00 anywhere in a document's text fails the whole ingestion.
+    """
+    return text.replace("\x00", "") if text else text
+
+
 def extract_pdf_text(file_path: Union[str, Path]) -> Optional[str]:
     """
     Extract plain text from a PDF using PyMuPDF (fitz).
@@ -29,7 +38,7 @@ def extract_pdf_text(file_path: Union[str, Path]) -> Optional[str]:
         for page_num in range(len(doc)):
             page = doc[page_num]
             # "text" mode preserves reading order better than default
-            text = page.get_text("text")
+            text = _strip_nul(page.get_text("text"))
             if text.strip():
                 pages_text.append(text.strip())
 
@@ -66,7 +75,7 @@ def extract_pdf_tables(file_path: Union[str, Path]) -> List[List[List[str]]]:
                 page_tables = page.extract_tables()
                 for table in page_tables:
                     # Normalise None cells to empty string
-                    clean_table = [[cell or "" for cell in row] for row in table]
+                    clean_table = [[_strip_nul(cell or "") for cell in row] for row in table]
                     tables.append(clean_table)
 
         logger.debug(f"pdfplumber extracted {len(tables)} tables from {file_path}")
@@ -122,10 +131,10 @@ def extract_pdf_metadata(file_path: Union[str, Path]) -> Dict:
         doc.close()
 
         meta = {
-            "title": raw_meta.get("title", ""),
-            "author": raw_meta.get("author", ""),
-            "subject": raw_meta.get("subject", ""),
-            "creator": raw_meta.get("creator", ""),
+            "title": _strip_nul(raw_meta.get("title", "")),
+            "author": _strip_nul(raw_meta.get("author", "")),
+            "subject": _strip_nul(raw_meta.get("subject", "")),
+            "creator": _strip_nul(raw_meta.get("creator", "")),
             "page_count": page_count,
         }
     except Exception as e:

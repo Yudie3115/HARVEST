@@ -100,6 +100,13 @@ class TestPDFExtractor:
         assert "Maize" in text
         assert "|" in text  # Markdown table format
 
+    def test_strip_nul_removes_null_bytes(self):
+        from src.extractors.pdf_extractor import _strip_nul
+
+        assert _strip_nul("bad\x00text") == "badtext"
+        assert _strip_nul("") == ""
+        assert _strip_nul(None) is None
+
     def test_extract_pdf_metadata_missing_file(self, tmp_path):
         from src.extractors.pdf_extractor import extract_pdf_metadata
 
