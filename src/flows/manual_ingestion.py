@@ -370,23 +370,22 @@ def ingest_manual_upload_flow(
     minio = MinIOClient()
 
     content = minio.get_object(staging_object) if staging_object else None
-    try:
-        return ingest_manual_document(
-            content=content,
-            filename=filename,
-            url=url,
-            title=title,
-            site_name=site_name,
-            doc_uuid=doc_uuid,
-            document_id=document_id,
-        )
-    finally:
-        if staging_object:
-            # Best effort — the document is already ingested by this point, so
-            # a stranded staging object must not fail the flow run.
-            try:
-                minio.delete_object(staging_object)
-            except Exception as exc:
-                logger.warning(
-                    f"Could not delete staging object {staging_object}: {exc}"
-                )
+    result = ingest_manual_document(
+        content=content,
+        filename=filename,
+        url=url,
+        title=title,
+        site_name=site_name,
+        doc_uuid=doc_uuid,
+        document_id=document_id,
+    )
+    # Keep the staging object when ingestion failed or raised: it may be the
+    # only remaining copy of the upload, and is what a retry needs.
+    if staging_object and result.get("status") != "failed":
+        # Best effort — the document is already ingested by this point, so
+        # a stranded staging object must not fail the flow run.
+        try:
+            minio.delete_object(staging_object)
+        except Exception as exc:
+            logger.warning(f"Could not delete staging object {staging_object}: {exc}")
+    return result

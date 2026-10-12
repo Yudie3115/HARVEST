@@ -87,6 +87,37 @@ def _detect_document_type(url: str, mime_type: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
+def _load_uploaded_document(db: PostgresClient, document_id: str, url: str) -> Optional[Dict]:
+    """Read a manual upload's stored bytes back from MinIO.
+
+    upload:// URIs are synthetic, so retrying one (e.g. via reprocess-stuck)
+    must reuse the file saved at ingestion time rather than fetch over HTTP.
+    """
+    document = db.get_document(UUID(document_id))
+    file_path = document.file_path if document else None
+    try:
+        if not file_path:
+            raise FileNotFoundError(
+                "The uploaded file is no longer stored; upload it again to process it."
+            )
+        content = MinIOClient().get_object(file_path)
+    except Exception as e:
+        logger.error(f"Could not load uploaded file for {url}: {e}")
+        db.update_document_status(UUID(document_id), DocumentStatus.FAILED, error_log=str(e))
+        return None
+
+    mime_type = document.mime_type or "application/octet-stream"
+    db.update_document_status(UUID(document_id), DocumentStatus.QUEUED)
+    return {
+        "minio_path": file_path,
+        "file_hash": hash_content(content),
+        "file_size": len(content),
+        "mime_type": mime_type,
+        "doc_type": document.document_type or _detect_document_type(url, mime_type),
+        "content": content,
+    }
+
+
 @task(
     name="download_document",
     retries=3,
@@ -102,9 +133,12 @@ def download_document(document_id: str, url: str) -> Optional[Dict]:
     """
     logger.info(f"Downloading: {url}")
 
+    db = PostgresClient()
+    if url.startswith("upload://"):
+        return _load_uploaded_document(db, document_id, url)
+
     headers = {"User-Agent": settings.crawl_user_agent}
     site_name = get_site_name_for_url(url)
-    db = PostgresClient()
 
     try:
         with httpx.Client(
