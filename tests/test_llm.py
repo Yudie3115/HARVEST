@@ -328,7 +328,7 @@ class TestPrompts:
         assert content in prompt
         assert url in prompt
 
-    def test_classification_prompts_cover_pre_and_post_harvest_topics(self):
+    def test_classification_prompts_cover_all_three_crop_stages(self):
         from src.llm.prompts import (
             build_content_classification_prompt,
             build_url_classification_prompt,
@@ -339,8 +339,21 @@ class TestPrompts:
         for prompt in (content_prompt, url_prompt):
             assert "field_pests_and_diseases" in prompt
             assert "seed_and_varieties" in prompt
+            assert "harvest_timing_and_methods" in prompt
             assert "storage" in prompt
-        assert "pre-harvest" in content_prompt
+        assert "pre-harvest, harvest and post-harvest" in content_prompt
+
+    def test_harvest_is_its_own_topic_stage(self):
+        from src.config.site_configs import (
+            HARVEST_TOPICS,
+            POST_HARVEST_TOPICS,
+            PRE_HARVEST_TOPICS,
+            TOPICS,
+        )
+
+        assert HARVEST_TOPICS == ["harvest_timing_and_methods"]
+        assert "harvest_timing_and_methods" not in PRE_HARVEST_TOPICS
+        assert TOPICS == PRE_HARVEST_TOPICS + HARVEST_TOPICS + POST_HARVEST_TOPICS
 
     def test_llm_client_uses_shared_classification_prompt(self):
         from src.llm.client import LLMClient

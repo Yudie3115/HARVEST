@@ -251,6 +251,9 @@ PRE_HARVEST_TOPICS = [
     "crop_management",
     "drought_and_water_stress",
     "field_pests_and_diseases",
+]
+
+HARVEST_TOPICS = [
     "harvest_timing_and_methods",
 ]
 
@@ -270,7 +273,7 @@ POST_HARVEST_TOPICS = [
     "warehouse_management",
 ]
 
-TOPICS = PRE_HARVEST_TOPICS + POST_HARVEST_TOPICS
+TOPICS = PRE_HARVEST_TOPICS + HARVEST_TOPICS + POST_HARVEST_TOPICS
 
 # Document types
 DOCUMENT_TYPES = [

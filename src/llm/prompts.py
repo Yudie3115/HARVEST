@@ -10,10 +10,10 @@ from src.config.site_configs import DOCUMENT_TYPES, TARGET_CROPS, TOPICS
 
 URL_CLASSIFICATION_SYSTEM = (
     "You are a content classifier for an agricultural knowledge base focused "
-    "on pre-harvest and post-harvest crop practices in Uganda."
+    "on pre-harvest, harvest and post-harvest crop practices in Uganda."
 )
 
-URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to pre-harvest topics (seed and varieties, planting, crop management, drought and water stress, field pests and diseases, harvest timing and methods) and post-harvest topics (storage, drying, pest management, contamination, quality control, handling, and marketing).
+URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to pre-harvest topics (seed and varieties, planting, crop management, drought and water stress, field pests and diseases), harvest topics (harvest timing and methods) and post-harvest topics (storage, drying, pest management, contamination, quality control, handling, and marketing).
 
 URLs:
 {url_list}
@@ -44,11 +44,11 @@ def build_url_classification_prompt(urls: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 CONTENT_CLASSIFICATION_SYSTEM = (
-    "You are an agricultural content analyzer specializing in pre-harvest and "
-    "post-harvest crop practices."
+    "You are an agricultural content analyzer specializing in pre-harvest, "
+    "harvest and post-harvest crop practices."
 )
 
-CONTENT_CLASSIFICATION_TEMPLATE = """Analyze this agricultural document excerpt and extract structured metadata for a crop knowledge base covering pre-harvest and post-harvest practices.
+CONTENT_CLASSIFICATION_TEMPLATE = """Analyze this agricultural document excerpt and extract structured metadata for a crop knowledge base covering pre-harvest, harvest and post-harvest practices.
 
 Source URL: {url}
 
@@ -57,7 +57,7 @@ Document excerpt:
 
 Extract the following information:
 
-1. relevance_score: Rate 0-10 for relevance to pre-harvest and post-harvest crop practices (see scoring guide below)
+1. relevance_score: Rate 0-10 for relevance to pre-harvest, harvest and post-harvest crop practices (see scoring guide below)
 2. primary_topics: Main topics from this list - {topics}
 3. crops_mentioned: Specific crops mentioned from this list - {crops}
 4. regions: Geographic areas mentioned (Ugandan districts or regions)
@@ -71,9 +71,9 @@ Extract the following information:
 12. technical_level: Simple/Intermediate/Advanced - complexity level
 
 Scoring guide:
-- 9-10: Highly relevant - dedicated pre-harvest or post-harvest crop guidance, research, or policy
-- 7-8: Very relevant - contains substantial pre-harvest or post-harvest crop information
-- 5-6: Moderately relevant - mentions pre-harvest or post-harvest topics
+- 9-10: Highly relevant - dedicated pre-harvest, harvest or post-harvest crop guidance, research, or policy
+- 7-8: Very relevant - contains substantial pre-harvest, harvest or post-harvest crop information
+- 5-6: Moderately relevant - mentions pre-harvest, harvest or post-harvest topics
 - 3-4: Tangentially relevant - agricultural content but not about growing, harvesting, or handling crops (e.g. livestock, general policy)
 - 0-2: Not relevant - unrelated to agriculture
 
@@ -120,7 +120,7 @@ def build_information_extraction_prompt(text: str, query: str) -> str:
 
 SUMMARISATION_SYSTEM = "You are an expert at summarizing agricultural content."
 
-SUMMARISATION_TEMPLATE = """Provide a concise {max_length}-character summary of this agricultural text, focusing on key pre-harvest and post-harvest practices and recommendations:
+SUMMARISATION_TEMPLATE = """Provide a concise {max_length}-character summary of this agricultural text, focusing on key pre-harvest, harvest and post-harvest practices and recommendations:
 
 {text}
 
@@ -135,7 +135,7 @@ def build_summarisation_prompt(text: str, max_length: int = 200) -> str:
 # RAG Q&A
 # ---------------------------------------------------------------------------
 
-QA_SYSTEM_PROMPT = """You are an agricultural knowledge assistant specialising in pre-harvest and post-harvest crop practices in Uganda and East Africa. Answer questions using only the provided document excerpts. Always cite your sources by referring to the source number (e.g. [1], [2]). If the excerpts do not contain enough information to answer the question, say so clearly — do not fabricate information."""
+QA_SYSTEM_PROMPT = """You are an agricultural knowledge assistant specialising in pre-harvest, harvest and post-harvest crop practices in Uganda and East Africa. Answer questions using only the provided document excerpts. Always cite your sources by referring to the source number (e.g. [1], [2]). If the excerpts do not contain enough information to answer the question, say so clearly — do not fabricate information."""
 
 QA_ANSWER_TEMPLATE = """Use the following document excerpts to answer the question. Each excerpt is preceded by its source number.
 
