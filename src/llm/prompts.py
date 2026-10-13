@@ -13,7 +13,7 @@ URL_CLASSIFICATION_SYSTEM = (
     "on pre-harvest, harvest and post-harvest crop practices in Uganda."
 )
 
-URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to pre-harvest topics (seed and varieties, planting, crop management, drought and water stress, field pests and diseases), harvest topics (harvest timing and methods) and post-harvest topics (storage, drying, pest management, contamination, quality control, handling, and marketing).
+URL_CLASSIFICATION_TEMPLATE = """Analyze these URLs and determine their relevance to post-harvest topics such as storage, drying, pest management, contamination, quality control, handling, and packaging.
 
 URLs:
 {url_list}

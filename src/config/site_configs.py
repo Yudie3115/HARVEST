@@ -265,9 +265,9 @@ POST_HARVEST_TOPICS = [
     "quality_control",
     "handling",
     "packaging",
-    "transportation",
-    "marketing",
-    "value_addition",
+    # "transportation",
+    # "marketing",
+    # "value_addition",
     "preservation",
     "cold_chain",
     "warehouse_management",
@@ -292,8 +292,10 @@ DOCUMENT_TYPES = [
 # Target crops (Uganda focus)
 TARGET_CROPS = [
     "maize",
+    "corn",
     "sorghum",
     "groundnut",
+    "peanut",
     "beans",
     # "cassava",
     # "sweet_potato",
